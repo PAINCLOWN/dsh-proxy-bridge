@@ -1,0 +1,9 @@
+# Bundle patch for @riceawa/dsh-proxy-bridge.
+# Registers the plugin in the DSH bundle. Disabled by default (safe):
+# the listener opens only after `proxy_bridge enable` or `enabled: true`.
+bundle:
+  plugins:
+    - id: dsh-proxy-bridge
+      entry: .
+      client: ./client
+      enabled: false
