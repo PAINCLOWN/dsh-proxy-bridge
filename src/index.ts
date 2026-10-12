@@ -47,6 +47,12 @@ import {
 } from './state.ts'
 import { loadOrCreateSelfSigned } from './tls.ts'
 
+/** Plugin identifier for the DSH bundle. */
+export const name = 'dsh-proxy-bridge'
+
+/** Services this plugin requires from the DSH runtime. */
+export const inject = ['tools']
+
 /** The bridge controller: owns the proxy lifecycle and config. */
 interface BridgeController {
   bridge: ProxyBridge | null

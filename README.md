@@ -27,9 +27,12 @@ DSH Web GUI 的 WebSocket 连接在通过 nginx → 网关 → DSH 链路时会�
 ## 安装
 
 ```bash
-# 在 DSH profile 的 node_modules 中安装
+# 通过 DSH 插件命令安装
+dsh plugin --profile web add @painclown/dsh-proxy-bridge
+
+# 或手动安装
 cd ~/.dsh/profiles/web
-npm install @riceawa/dsh-proxy-bridge
+npm install @painclown/dsh-proxy-bridge
 ```
 
 ## 快速开始
