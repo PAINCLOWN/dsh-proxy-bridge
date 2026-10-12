@@ -2,7 +2,7 @@
  * Client entry point for the DSH proxy bridge plugin.
  * Registers the config card on the DSH Plugins page.
  *
- * @module @riceawa/dsh-proxy-bridge/client
+ * @module @painclown/dsh-proxy-bridge/client
  */
 
 import type { ClientContext } from '@deepseek-ai/cordis'

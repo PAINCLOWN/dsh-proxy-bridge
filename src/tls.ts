@@ -1,7 +1,7 @@
 /**
  * Self-signed TLS certificate management for the proxy bridge.
  *
- * @module @riceawa/dsh-proxy-bridge/tls
+ * @module @painclown/dsh-proxy-bridge/tls
  */
 
 import { chmodSync, existsSync, mkdirSync, readFileSync, writeFileSync } from 'node:fs'

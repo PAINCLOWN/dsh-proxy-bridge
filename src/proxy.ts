@@ -17,7 +17,7 @@
  * - Rate limiting protects the login path from brute-force attacks.
  * - Optional TLS: self-signed certificate for direct HTTPS access.
  *
- * @module @riceawa/dsh-proxy-bridge/proxy
+ * @module @painclown/dsh-proxy-bridge/proxy
  */
 
 import http from 'node:http'

@@ -1,7 +1,8 @@
 {
-  "name": "@riceawa/dsh-proxy-bridge",
-  "description": "Lightweight reverse-proxy bridge for the DeepSeek Harness web GUI, designed to sit behind a TLS-terminating reverse proxy (nginx). Solves the WebSocket Origin/Host mismatch that breaks WS connections through nginx → gateway → DSH chains. Unlike the LAN gateway, it trusts the upstream terminator and skips the strict same-site fence, so WS upgrades relay cleanly.",
+  "name": "@painclown/dsh-proxy-bridge",
+  "description": "Lightweight reverse-proxy bridge for the DeepSeek Harness web GUI, designed to sit behind a TLS-terminating reverse proxy (nginx). Solves the WebSocket Origin/Host mismatch that breaks WS connections through nginx → gateway → DSH chains. Inspired by @riceawa/dsh-lan-gateway.",
   "version": "0.1.0",
+  "author": "PAINCLOWN",
   "type": "module",
   "main": "lib/index.mjs",
   "types": "lib/index.d.mts",

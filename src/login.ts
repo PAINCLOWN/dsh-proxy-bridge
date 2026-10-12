@@ -1,7 +1,7 @@
 /**
  * Login page rendering and login/logout path handling for the proxy bridge.
  *
- * @module @riceawa/dsh-proxy-bridge/login
+ * @module @painclown/dsh-proxy-bridge/login
  */
 
 import type { IncomingMessage, ServerResponse, OutgoingHttpHeaders } from 'node:http'

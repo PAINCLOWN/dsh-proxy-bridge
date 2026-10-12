@@ -3,7 +3,7 @@
  * (loopback / lan / internet), HMAC-signed session cookies, and an in-memory
  * per-source login rate limiter.
  *
- * @module @riceawa/dsh-proxy-bridge/auth
+ * @module @painclown/dsh-proxy-bridge/auth
  */
 
 import { createHmac, timingSafeEqual } from 'node:crypto'

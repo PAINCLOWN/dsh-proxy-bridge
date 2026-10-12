@@ -1,6 +1,8 @@
-# @riceawa/dsh-proxy-bridge
+# @painclown/dsh-proxy-bridge
 
 轻量级 DSH 反向代理桥，专为 nginx 等 TLS 终结反代后面的 WebSocket 转发设计。
+
+> 理念参考 [@riceawa/dsh-lan-gateway](https://github.com/rice-awa/dsh-lan-gateway)，感谢 riceawa 的启发。
 
 ## 解决什么问题
 

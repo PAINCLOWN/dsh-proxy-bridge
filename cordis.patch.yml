@@ -1,4 +1,4 @@
-# Bundle patch for @riceawa/dsh-proxy-bridge.
+# Bundle patch for @painclown/dsh-proxy-bridge.
 # Registers the plugin in the DSH bundle. Disabled by default (safe):
 # the listener opens only after `proxy_bridge enable` or `enabled: true`.
 bundle:

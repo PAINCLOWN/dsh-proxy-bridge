@@ -1,7 +1,7 @@
 /**
  * Configuration field definitions for the DSH proxy bridge plugin.
  *
- * @module @riceawa/dsh-proxy-bridge/config-fields
+ * @module @painclown/dsh-proxy-bridge/config-fields
  */
 
 import z from '@deepseek-ai/schemastery'

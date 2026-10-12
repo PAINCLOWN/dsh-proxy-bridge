@@ -1,7 +1,7 @@
 /**
  * The proxy bridge configuration card for the DSH Plugins page.
  *
- * @module @riceawa/dsh-proxy-bridge/client/bridge-card
+ * @module @painclown/dsh-proxy-bridge/client/bridge-card
  */
 
 import { useState, useCallback } from 'react'

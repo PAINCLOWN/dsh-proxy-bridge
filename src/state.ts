@@ -2,7 +2,7 @@
  * Persistent runtime state for the proxy bridge: the cookie-signing secret and
  * the scrypt password hash. Lives in `~/.dsh/proxy-bridge/state.json` (0600).
  *
- * @module @riceawa/dsh-proxy-bridge/state
+ * @module @painclown/dsh-proxy-bridge/state
  */
 
 import { chmodSync, mkdirSync, readFileSync, renameSync, writeFileSync } from 'node:fs'

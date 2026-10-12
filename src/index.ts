@@ -1,5 +1,5 @@
 /**
- * @riceawa/dsh-proxy-bridge — a lightweight reverse-proxy bridge for the
+ * @painclown/dsh-proxy-bridge — a lightweight reverse-proxy bridge for the
  * DeepSeek Harness web GUI, designed to sit behind a TLS-terminating reverse
  * proxy (nginx).
  *
@@ -20,7 +20,7 @@
  * Disabled by default: the listener opens only after `proxy_bridge enable`
  * or `enabled: true` in settings.
  *
- * @module @riceawa/dsh-proxy-bridge
+ * @module @painclown/dsh-proxy-bridge
  */
 
 import type { Context } from '@deepseek-ai/cordis'
