@@ -18,6 +18,7 @@
 
 import http from 'node:http'
 import net from 'node:net'
+import crypto from 'node:crypto'
 import type { Duplex } from 'node:stream'
 import type { IncomingHttpHeaders, OutgoingHttpHeaders } from 'node:http'
 
@@ -140,9 +141,94 @@ export class ProxyBridge {
     return this.running
   }
 
-  /** Handle a regular HTTP request: forward to DSH. */
+  /** Generate an auth cookie value from the password. */
+  private signCookie(password: string): string {
+    const secret = `dsh-proxy-bridge:${password}`
+    return crypto.createHmac('sha256', secret).update('bridge-session').digest('hex')
+  }
+
+  /** Check if the request carries a valid auth cookie. */
+  private hasValidAuth(req: http.IncomingMessage): boolean {
+    const { password, cookieName } = this.config
+    if (!password) return true // No password set — open access.
+    const cookieHeader = req.headers.cookie
+    if (!cookieHeader) return false
+    const cookies = new URLSearchParams(cookieHeader.split(';').map((c) => c.trim().replace(/^.*?=/, '')).join('&'))
+    // Simpler: parse manually
+    const match = cookieHeader.match(new RegExp(`(?:^|;\\s*)${cookieName}=([^;]*)`))
+    if (!match) return false
+    const expected = this.signCookie(password)
+    return crypto.timingSafeEqual(Buffer.from(match[1]), Buffer.from(expected))
+  }
+
+  /** Serve the login page. */
+  private serveLoginPage(res: http.ServerResponse, error?: string): void {
+    const errHtml = error ? `<div style="color:#e55;margin-bottom:12px">${error}</div>` : ''
+    res.writeHead(200, { 'content-type': 'text/html; charset=utf-8' })
+    res.end(`<!DOCTYPE html>
+<html lang="zh">
+<head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1"><title>DSH Bridge</title>
+<style>
+body{display:flex;align-items:center;justify-content:center;min-height:100vh;margin:0;background:#1a1a2e;font-family:system-ui,sans-serif}
+.card{background:#16213e;padding:40px;border-radius:12px;box-shadow:0 8px 32px rgba(0,0,0,.4);width:320px;text-align:center}
+h1{color:#e94560;font-size:22px;margin:0 0 8px}
+p{color:#a0a0b0;font-size:13px;margin:0 0 24px}
+input{width:100%;padding:10px 14px;border:1px solid #0f3460;border-radius:6px;background:#0f3460;color:#fff;font-size:14px;box-sizing:border-box;margin-bottom:16px}
+input:focus{outline:none;border-color:#e94560}
+button{width:100%;padding:10px;background:#e94560;color:#fff;border:none;border-radius:6px;font-size:14px;cursor:pointer}
+button:hover{background:#c73650}
+</style></head>
+<body>
+<div class="card">
+<h1>DSH Bridge</h1>
+<p>请输入密码访问</p>
+${errHtml}
+<form method="POST" action="/__bridge_login">
+<input type="password" name="password" placeholder="密码" autofocus required>
+<button type="submit">进入</button>
+</form>
+</div>
+</body></html>`)
+  }
+
+  /** Handle the login POST. */
+  private handleLogin(req: http.IncomingMessage, res: http.ServerResponse): void {
+    const { password, cookieName, cookieMaxAgeDays } = this.config
+    const chunks: Buffer[] = []
+    req.on('data', (c: Buffer) => chunks.push(c))
+    req.on('end', () => {
+      const body = Buffer.concat(chunks).toString()
+      const params = new URLSearchParams(body)
+      const submitted = params.get('password') ?? ''
+      if (password && submitted === password) {
+        const value = this.signCookie(password)
+        const maxAge = cookieMaxAgeDays * 86400
+        res.writeHead(302, {
+          location: '/',
+          'set-cookie': `${cookieName}=${value}; Path=/; HttpOnly; SameSite=Lax; Max-Age=${maxAge}`,
+        })
+        res.end()
+      } else {
+        this.serveLoginPage(res, '密码错误')
+      }
+    })
+  }
+
+  /** Handle a regular HTTP request: auth gate, then forward to DSH. */
   private handleHttp(req: http.IncomingMessage, res: http.ServerResponse): void {
     const { dshPort } = this.config
+
+    // Login endpoint
+    if (req.url === '/__bridge_login' && req.method === 'POST') {
+      this.handleLogin(req, res)
+      return
+    }
+
+    // Auth gate
+    if (!this.hasValidAuth(req)) {
+      this.serveLoginPage(res)
+      return
+    }
 
     // Read the full request body.
     const chunks: Buffer[] = []
@@ -191,13 +277,20 @@ export class ProxyBridge {
     })
   }
 
-  /** Handle a WebSocket upgrade: splice the socket to the upstream DSH server. */
+  /** Handle a WebSocket upgrade: auth gate, then splice the socket to upstream. */
   private handleUpgrade(
     req: http.IncomingMessage,
     socket: Duplex,
     head: Buffer,
   ): void {
     const { dshPort } = this.config
+
+    // Auth gate for WS
+    if (!this.hasValidAuth(req)) {
+      socket.write('HTTP/1.1 401 Unauthorized\r\nConnection: close\r\n\r\n')
+      socket.end()
+      return
+    }
 
     const headers = buildUpstreamHeaders(req.headers, dshPort, true)
 
