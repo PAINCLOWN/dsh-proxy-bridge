@@ -34,6 +34,8 @@ export interface ProxyConfig {
   cookieName: string
   /** Cookie lifetime in days. */
   cookieMaxAgeDays: number
+  /** DSH browser-session secret (base64url) for auto-injecting DSH auth cookies. */
+  dshSecret?: string
 }
 
 /** Hop-by-hop headers a proxy must not forward (RFC 9110 §7.6.1). */
@@ -86,6 +88,48 @@ export function buildUpstreamHeaders(
   }
   for (const name of FORWARDING_HEADERS) delete out[name]
   return out
+}
+
+// --- DSH auth cookie generation ---
+
+function base64url(buf: Buffer): string {
+  return buf.toString('base64').replace(/\+/g, '-').replace(/\//g, '_').replace(/=+$/, '')
+}
+
+function base64urlDecode(str: string): Buffer {
+  let s = str.replace(/-/g, '+').replace(/_/g, '/')
+  while (s.length % 4) s += '='
+  return Buffer.from(s, 'base64')
+}
+
+/** DSH cookie name: `dsh-auth-` + base64url(sha256(authority)). */
+function dshCookieName(authority: string): string {
+  return 'dsh-auth-' + base64url(crypto.createHash('sha256').update(authority).digest())
+}
+
+/** Encode a DSH browser-session cookie: `v1.<base64url(JSON)>.<base64url(HMAC)>`. */
+function dshEncodeCookie(payload: Record<string, unknown>, secretB64: string): string {
+  const secret = base64urlDecode(secretB64)
+  const body = base64url(Buffer.from(JSON.stringify(payload), 'utf8'))
+  const sig = base64url(crypto.createHmac('sha256', secret).update(body).digest())
+  return `v1.${body}.${sig}`
+}
+
+/** Generate a DSH auth cookie for the given authority and secret. */
+export function generateDshCookie(dshPort: number, secretB64: string): string {
+  const authority = `127.0.0.1:${dshPort}`
+  const now = Date.now()
+  const maxAge = 30 * 86400 * 1000
+  const payload = { version: 1, authority, issuedAt: now, expiresAt: now + maxAge }
+  const value = dshEncodeCookie(payload, secretB64)
+  return `${dshCookieName(authority)}=${value}`
+}
+
+/** Check if a request already carries a DSH auth cookie. */
+function hasDshCookie(req: http.IncomingMessage): boolean {
+  const cookieHeader = req.headers.cookie
+  if (!cookieHeader) return false
+  return /dsh-auth-/.test(cookieHeader)
 }
 
 /**
@@ -238,6 +282,14 @@ ${errHtml}
     req.on('end', () => {
       const body = Buffer.concat(chunks)
       const headers = buildUpstreamHeaders(req.headers, dshPort, false)
+
+      // Inject DSH auth cookie if the client doesn't already have one.
+      const { dshSecret } = this.config
+      if (dshSecret && !hasDshCookie(req)) {
+        const dshCookie = generateDshCookie(dshPort, dshSecret)
+        headers.cookie = headers.cookie ? `${headers.cookie}; ${dshCookie}` : dshCookie
+      }
+
       if (body.length > 0) {
         headers['content-length'] = String(body.length)
       }
@@ -295,6 +347,13 @@ ${errHtml}
     }
 
     const headers = buildUpstreamHeaders(req.headers, dshPort, true)
+
+    // Inject DSH auth cookie for WS upgrades.
+    const { dshSecret } = this.config
+    if (dshSecret && !hasDshCookie(req)) {
+      const dshCookie = generateDshCookie(dshPort, dshSecret)
+      headers.cookie = headers.cookie ? `${headers.cookie}; ${dshCookie}` : dshCookie
+    }
 
     // Build the raw upgrade request.
     const rawHeaders = Object.entries(headers)

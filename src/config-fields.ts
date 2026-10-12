@@ -38,6 +38,8 @@ export const BridgeConfig = z.object({
   cookieName: z.string().default(DEFAULT_COOKIE_NAME).volatile(),
   /** Cookie lifetime in days. */
   cookieMaxAgeDays: z.natural().min(1).max(365).default(DEFAULT_COOKIE_MAX_AGE_DAYS).volatile(),
+  /** DSH browser-session secret (base64url) for auto-injecting DSH auth cookies. */
+  dshSecret: z.string().default('').volatile(),
 })
 
 export type BridgeConfigValue = z.infer<typeof BridgeConfig>
@@ -50,6 +52,7 @@ export const CONFIG_FIELD_KEYS = [
   'password',
   'cookieName',
   'cookieMaxAgeDays',
+  'dshSecret',
 ] as const
 
 /** Keys that may be omitted (have defaults). */
@@ -57,4 +60,5 @@ export const OPTIONAL_CONFIG_KEYS = [
   'password',
   'cookieName',
   'cookieMaxAgeDays',
+  'dshSecret',
 ] as const

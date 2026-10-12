@@ -85,6 +85,7 @@ function createController(ctx: Context): BridgeController {
       password: config.password || undefined,
       cookieName: config.cookieName,
       cookieMaxAgeDays: config.cookieMaxAgeDays,
+      dshSecret: config.dshSecret || undefined,
     }
 
     bridge = new ProxyBridge(proxyConfig)
@@ -165,9 +166,11 @@ export default function proxyBridgePlugin(ctx: Context): void {
         .describe('Upstream DSH port (enable/config only).'),
       password: z.string().optional()
         .describe('Bridge password (config only; empty string clears).'),
+      dshSecret: z.string().optional()
+        .describe('DSH browser-session secret for auto-injecting DSH auth cookies (config only).'),
     }),
     async execute(input: z.infer<typeof tool.schema>) {
-      const { command, port, dshPort, password } = input
+      const { command, port, dshPort, password, dshSecret } = input
 
       switch (command) {
         case 'status': {
@@ -208,6 +211,7 @@ export default function proxyBridgePlugin(ctx: Context): void {
             }
             updates.password = password
           }
+          if (dshSecret !== undefined) updates.dshSecret = dshSecret
           controller.updateConfig(updates)
           const s = controller.status()
           return { ok: true, message: `Config updated. Bridge ${s.running ? 'running' : 'stopped'} on port ${s.port}.` }
