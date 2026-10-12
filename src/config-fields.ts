@@ -24,6 +24,9 @@ export const DEFAULT_COOKIE_MAX_AGE_DAYS = 30
 /** Minimum password length when a password is set. */
 export const MIN_PASSWORD_LENGTH = 8
 
+/** Default self-signed certificate validity in days. */
+export const DEFAULT_TLS_DAYS = 365
+
 /** The configuration schema. */
 export const BridgeConfig = z.object({
   /** Whether the bridge listener is active. */
@@ -40,6 +43,18 @@ export const BridgeConfig = z.object({
   cookieMaxAgeDays: z.natural().min(1).max(365).default(DEFAULT_COOKIE_MAX_AGE_DAYS).volatile(),
   /** DSH browser-session secret (base64url) for auto-injecting DSH auth cookies. */
   dshSecret: z.string().default('').volatile(),
+  /** Whether the ingress is encrypted (self TLS or a declared trusted terminator); adds `Secure` to cookies. */
+  secureCookies: z.boolean().default(false).volatile(),
+  /** Whether to enable self-signed TLS (HTTPS listener). */
+  tlsEnabled: z.boolean().default(false).volatile(),
+  /** Days for the self-signed certificate validity. */
+  tlsDays: z.natural().min(1).max(3650).default(DEFAULT_TLS_DAYS).volatile(),
+  /** Hosts to include in the self-signed certificate SAN. */
+  tlsHosts: z.array(z.string()).default([]).volatile(),
+  /** LAN CIDRs that may be treated as trusted. */
+  lanCidrs: z.array(z.string()).default([]).volatile(),
+  /** Whether LAN/loopback sources may skip the gateway login (explicit opt-in). */
+  lanPasswordless: z.boolean().default(false).volatile(),
 })
 
 export type BridgeConfigValue = z.infer<typeof BridgeConfig>
@@ -53,6 +68,12 @@ export const CONFIG_FIELD_KEYS = [
   'cookieName',
   'cookieMaxAgeDays',
   'dshSecret',
+  'secureCookies',
+  'tlsEnabled',
+  'tlsDays',
+  'tlsHosts',
+  'lanCidrs',
+  'lanPasswordless',
 ] as const
 
 /** Keys that may be omitted (have defaults). */
@@ -61,4 +82,10 @@ export const OPTIONAL_CONFIG_KEYS = [
   'cookieName',
   'cookieMaxAgeDays',
   'dshSecret',
+  'secureCookies',
+  'tlsEnabled',
+  'tlsDays',
+  'tlsHosts',
+  'lanCidrs',
+  'lanPasswordless',
 ] as const
