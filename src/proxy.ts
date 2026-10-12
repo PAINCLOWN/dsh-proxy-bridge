@@ -158,7 +158,9 @@ export class ProxyBridge {
     const match = cookieHeader.match(new RegExp(`(?:^|;\\s*)${cookieName}=([^;]*)`))
     if (!match) return false
     const expected = this.signCookie(password)
-    return crypto.timingSafeEqual(Buffer.from(match[1]), Buffer.from(expected))
+    const provided = match[1]
+    if (provided.length !== expected.length) return false
+    return crypto.timingSafeEqual(Buffer.from(provided), Buffer.from(expected))
   }
 
   /** Serve the login page. */
