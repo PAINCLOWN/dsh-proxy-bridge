@@ -17,6 +17,7 @@
  */
 
 import http from 'node:http'
+import net from 'node:net'
 import type { Duplex } from 'node:stream'
 import type { IncomingHttpHeaders, OutgoingHttpHeaders } from 'node:http'
 
@@ -200,65 +201,64 @@ export class ProxyBridge {
 
     const headers = buildUpstreamHeaders(req.headers, dshPort, true)
 
-    const upstreamSocket = http.request({
-      hostname: '127.0.0.1',
-      port: dshPort,
-      path: req.url,
-      method: req.method,
-      headers,
-      createConnection: (options, callback) => {
-        // Use a raw TCP connection for the upgrade.
-        const net = require('node:net') as typeof import('node:net')
-        const sock = net.connect(options)
-        callback(sock)
-        return sock
-      },
-    } as any)
-
-    // Write the upgrade request line and headers.
+    // Build the raw upgrade request.
     const rawHeaders = Object.entries(headers)
       .map(([k, v]) => `${k}: ${Array.isArray(v) ? v.join(', ') : v}`)
       .join('\r\n')
-    const requestLine = `${req.method} ${req.url} HTTP/1.1\r\n${rawHeaders}\r\n\r\n`
+    const requestLine = `${req.method ?? 'GET'} ${req.url ?? '/'} HTTP/1.1\r\n${rawHeaders}\r\n\r\n`
 
-    upstreamSocket.on('response', (upstreamRes: http.IncomingMessage) => {
-      if (upstreamRes.statusCode === 101) {
-        // Upgrade successful — splice the two sockets.
-        const upstreamSock = upstreamRes.socket as Duplex
-        if (!upstreamSock) {
-          socket.destroy()
-          return
-        }
-        // Forward any initial data.
-        if (head.length > 0) upstreamSock.write(head)
-        upstreamSock.pipe(socket)
-        socket.pipe(upstreamSock)
-        upstreamSock.on('error', () => socket.destroy())
-        socket.on('error', () => upstreamSock.destroy())
-        upstreamSock.on('close', () => socket.destroy())
-        socket.on('close', () => upstreamSock.destroy())
-      } else {
-        // Upgrade rejected — forward the error response.
-        const statusLine = `HTTP/1.1 ${upstreamRes.statusCode ?? 502} ${upstreamRes.statusMessage ?? 'Error'}\r\n`
-        const headerLines = Object.entries(upstreamRes.headers)
-          .map(([k, v]) => `${k}: ${Array.isArray(v) ? v.join(', ') : v}`)
-          .join('\r\n')
-        socket.write(`${statusLine}${headerLines}\r\n\r\n`)
-        upstreamRes.pipe(socket)
-        upstreamRes.on('end', () => socket.end())
-        socket.on('error', () => upstreamRes.destroy())
-      }
+    // Raw TCP connection to the upstream DSH server.
+    const upstream = net.connect({ host: '127.0.0.1', port: dshPort })
+
+    upstream.on('connect', () => {
+      upstream.write(requestLine)
+      if (head.length > 0) upstream.write(head)
     })
 
-    upstreamSocket.on('error', (err) => {
+    let buf = Buffer.alloc(0)
+    const onData = (chunk: Buffer) => {
+      buf = Buffer.concat([buf, chunk])
+      const headerEnd = buf.indexOf('\r\n\r\n')
+      if (headerEnd === -1) return // Not enough data yet.
+
+      const headerBlock = buf.slice(0, headerEnd).toString()
+      const bodyStart = headerEnd + 4
+      const statusLine = headerBlock.split('\r\n')[0]
+      const statusCode = parseInt(statusLine.split(' ')[1] ?? '0', 10)
+
+      // Remove the data handler so remaining data flows through the pipe.
+      upstream.removeListener('data', onData)
+
+      if (statusCode === 101) {
+        // Upgrade successful — forward the full 101 response to the client,
+        // then splice the two sockets for bidirectional data flow.
+        socket.write(buf)
+        upstream.pipe(socket)
+        socket.pipe(upstream)
+        upstream.on('error', () => socket.destroy())
+        socket.on('error', () => upstream.destroy())
+        upstream.on('close', () => socket.destroy())
+        socket.on('close', () => upstream.destroy())
+      } else {
+        // Upgrade rejected — forward the error response.
+        socket.write(buf)
+        upstream.pipe(socket)
+        upstream.on('end', () => socket.end())
+        upstream.on('error', () => socket.destroy())
+        socket.on('error', () => upstream.destroy())
+      }
+    }
+    upstream.on('data', onData)
+
+    upstream.on('error', (err: Error) => {
       if (!socket.destroyed) {
         socket.write('HTTP/1.1 502 Bad Gateway\r\nConnection: close\r\n\r\n')
         socket.end(`Bridge upstream error: ${err.message}\r\n`)
       }
     })
 
-    upstreamSocket.write(requestLine)
-    if (head.length > 0) upstreamSocket.end(head)
-    else upstreamSocket.end()
+    socket.on('error', () => {
+      upstream.destroy()
+    })
   }
 }
