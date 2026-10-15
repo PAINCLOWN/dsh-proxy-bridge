@@ -25,7 +25,7 @@
 
 import type { Context } from '@deepseek-ai/cordis'
 import z from '@deepseek-ai/schemastery'
-import type SettingsService from '@deepseek-ai/dsh-settings'
+import SettingsService from '@deepseek-ai/dsh-settings'
 import type {} from '@deepseek-ai/cordis-plugin-loader'
 import {
   BridgeConfig,
