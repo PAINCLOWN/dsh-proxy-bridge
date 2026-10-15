@@ -403,11 +403,18 @@ export class ProxyBridge {
         headers['content-length'] = String(body.length)
       }
 
+      // Rewrite client-side routing prefixes that DSH's server doesn't recognize.
+      // The sidebar plugin calls /sidebar/api/... but the server API is at /api/...
+      let upstreamPath = req.url ?? '/'
+      if (upstreamPath.startsWith('/sidebar/api/')) {
+        upstreamPath = upstreamPath.replace('/sidebar/api/', '/api/')
+      }
+
       const upstreamReq = http.request(
         {
           hostname: '127.0.0.1',
           port: dshPort,
-          path: req.url ?? '/',
+          path: upstreamPath,
           method: req.method,
           headers,
         },
@@ -448,11 +455,17 @@ export class ProxyBridge {
         headers.cookie = headers.cookie ? `${headers.cookie}; ${dshCookie}` : dshCookie
       }
 
+      // Rewrite client-side routing prefixes for WS upgrades too.
+      let upstreamPath = req.url ?? '/'
+      if (upstreamPath.startsWith('/sidebar/api/')) {
+        upstreamPath = upstreamPath.replace('/sidebar/api/', '/api/')
+      }
+
       // Build the raw upgrade request.
       const rawHeaders = Object.entries(headers)
         .map(([k, v]) => `${k}: ${Array.isArray(v) ? v.join(', ') : v}`)
         .join('\r\n')
-      const requestLine = `${req.method ?? 'GET'} ${req.url ?? '/'} HTTP/1.1\r\n${rawHeaders}\r\n\r\n`
+      const requestLine = `${req.method ?? 'GET'} ${upstreamPath} HTTP/1.1\r\n${rawHeaders}\r\n\r\n`
 
       const upstream = net.connect({ host: '127.0.0.1', port: dshPort })
 

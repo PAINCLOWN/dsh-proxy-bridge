@@ -68,7 +68,7 @@ interface BridgeController {
 /**
  * Create the bridge controller that manages the proxy lifecycle.
  */
-function createController(ctx: Context): BridgeController {
+export function createController(ctx: Context): BridgeController {
   let bridge: ProxyBridge | null = null
   let config: BridgeConfigValue = {
     enabled: false,
