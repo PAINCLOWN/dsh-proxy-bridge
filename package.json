@@ -12,10 +12,7 @@
       "default": "./lib/index.mjs"
     },
     "./cordis.patch.yml": "./cordis.patch.yml",
-    "./package.json": "./package.json",
-    "./client": {
-      "default": "./lib/client.mjs"
-    }
+    "./package.json": "./package.json"
   },
   "files": [
     "lib",
@@ -30,10 +27,6 @@
   "dsh": {
     "bundle": {
       "patch": "./cordis.patch.yml"
-    },
-    "client": {
-      "platform": "web",
-      "immediately": true
     }
   },
   "peerDependencies": {

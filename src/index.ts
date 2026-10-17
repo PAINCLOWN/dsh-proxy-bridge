@@ -26,6 +26,7 @@
 import type { Context } from '@deepseek-ai/cordis'
 import z from '@deepseek-ai/schemastery'
 import SettingsService from '@deepseek-ai/dsh-settings'
+import { defineTool } from '@deepseek-ai/dsh-tools'
 import type {} from '@deepseek-ai/cordis-plugin-loader'
 import {
   BridgeConfig,
@@ -50,8 +51,25 @@ import { loadOrCreateSelfSigned } from './tls.ts'
 /** Plugin identifier for the DSH bundle. */
 export const name = 'dsh-proxy-bridge'
 
-/** Services this plugin requires from the DSH runtime. */
+/**
+ * Services this plugin requires from the DSH runtime. Note: `logger` is NOT
+ * listed here — it's assigned directly on the base context (`ctx.logger`),
+ * so property lookup resolves it immediately without going through the
+ * inject-gated service path. Only genuinely injected services (like `tools`)
+ * need to be declared.
+ */
 export const inject = ['tools']
+proxyBridgePlugin.inject = inject
+
+/**
+ * cordis only validates/passes through the loader's YAML `config:` block as
+ * the plugin's second constructor argument when the plugin exposes a
+ * `Config` schema (checked via plugin.Config["~standard"].validate). Without
+ * this, cordis.patch.yml's `config: { enabled: true, port: 3083, ... }` is
+ * silently discarded and the plugin always boots with hardcoded defaults.
+ */
+export const Config = BridgeConfig
+proxyBridgePlugin.Config = Config
 
 /** The bridge controller: owns the proxy lifecycle and config. */
 interface BridgeController {
@@ -67,8 +85,14 @@ interface BridgeController {
 
 /**
  * Create the bridge controller that manages the proxy lifecycle.
+ *
+ * Config precedence (lowest to highest): hardcoded defaults, the
+ * loader-supplied `initialConfig` (the YAML `config:` block in
+ * cordis.patch.yml / bundle insert), then anything already persisted in
+ * SettingsService (so `proxy_bridge config` calls survive a reload without
+ * being clobbered by the YAML every restart).
  */
-export function createController(ctx: Context): BridgeController {
+export function createController(ctx: Context, initialConfig?: Partial<BridgeConfigValue>): BridgeController {
   let bridge: ProxyBridge | null = null
   let config: BridgeConfigValue = {
     enabled: false,
@@ -84,11 +108,13 @@ export function createController(ctx: Context): BridgeController {
     tlsHosts: [],
     lanCidrs: [],
     lanPasswordless: false,
+    ...initialConfig,
   }
   let state: BridgeState = loadState()
   let disposed = false
 
-  // Read persisted config from settings if available.
+  // Read persisted config from settings if available (overrides the YAML
+  // config, so runtime changes via the proxy_bridge tool stick across restarts).
   try {
     const settings = ctx.services.get(SettingsService) as SettingsService | undefined
     if (settings) {
@@ -126,7 +152,7 @@ export function createController(ctx: Context): BridgeController {
       })
       tls = material
       if (created) {
-        ctx.log?.info?.(`[proxy-bridge] generated self-signed TLS certificate (CN=${hosts[0]})`)
+        ctx.logger.info(`[proxy-bridge] generated self-signed TLS certificate (CN=${hosts[0]})`)
       }
     }
 
@@ -151,14 +177,14 @@ export function createController(ctx: Context): BridgeController {
     bridge = new ProxyBridge(proxyConfig)
     await bridge.listen()
     const proto = config.tlsEnabled ? 'https' : 'http'
-    ctx.log?.info?.(`[proxy-bridge] listening on 0.0.0.0:${config.port} → 127.0.0.1:${config.dshPort} (${proto})`)
+    ctx.logger.info(`[proxy-bridge] listening on 0.0.0.0:${config.port} → 127.0.0.1:${config.dshPort} (${proto})`)
   }
 
   async function stop(): Promise<void> {
     if (bridge) {
       await bridge.close()
       bridge = null
-      ctx.log?.info?.('[proxy-bridge] stopped')
+      ctx.logger.info('[proxy-bridge] stopped')
     }
   }
 
@@ -222,45 +248,105 @@ export function createController(ctx: Context): BridgeController {
  * The DSH plugin entry point. Registers the proxy bridge tool and manages
  * the listener lifecycle.
  */
-export default function proxyBridgePlugin(ctx: Context): void {
-  const controller = createController(ctx)
+export default function proxyBridgePlugin(ctx: Context, config?: Partial<BridgeConfigValue>): void {
+  const controller = createController(ctx, config)
+
+  // cordis reads `inject` off the plugin function/object itself (plugin.inject),
+  // not off a module-level named export, so the dependency on `tools` must be
+  // attached here or ctx.tools below will throw "cannot get property without inject".
 
   // The management tool: lets the agent (and the config card) control the bridge.
-  const tool = {
+  // dsh-tools' defineTool() expects a plain JSON-schema-style property map for
+  // `parameters` and an explicit `output: { schema, render }` — not a
+  // schemastery z.object() tacked on as `schema` (that's the old/wrong shape
+  // and is what made ctx.tools.register() throw at construction time).
+  interface ProxyBridgeArgs {
+    command?: 'status' | 'enable' | 'disable' | 'restart' | 'config'
+    port?: number
+    dshPort?: number
+    password?: string
+    dshSecret?: string
+    secureCookies?: boolean
+    tlsEnabled?: boolean
+    tlsDays?: number
+    tlsHosts?: string[]
+    lanCidrs?: string[]
+    lanPasswordless?: boolean
+  }
+  interface ProxyBridgeResult {
+    ok: boolean
+    message: string
+  }
+
+  const tool = defineTool({
     name: 'proxy_bridge',
     description:
       'Manage the DSH proxy bridge: a lightweight reverse proxy that sits behind nginx and relays HTTP + WebSocket to the DSH web server. Use to enable/disable, check status, or reconfigure the bridge.',
-    schema: z.object({
-      command: z.union([
-        z.const('status'),
-        z.const('enable'),
-        z.const('disable'),
-        z.const('restart'),
-        z.const('config'),
-      ]).default('status'),
-      port: z.natural().min(1).max(65535).optional()
-        .describe('Port to bind (enable/config only).'),
-      dshPort: z.natural().min(1).max(65535).optional()
-        .describe('Upstream DSH port (enable/config only).'),
-      password: z.string().optional()
-        .describe('Bridge password (config only; empty string clears).'),
-      dshSecret: z.string().optional()
-        .describe('DSH browser-session secret for auto-injecting DSH auth cookies (config only).'),
-      secureCookies: z.boolean().optional()
-        .describe('Add Secure flag to session cookies (config only).'),
-      tlsEnabled: z.boolean().optional()
-        .describe('Enable self-signed TLS / HTTPS listener (config only).'),
-      tlsDays: z.natural().min(1).max(3650).optional()
-        .describe('Self-signed certificate validity in days (config only).'),
-      tlsHosts: z.array(z.string()).optional()
-        .describe('Hosts for the self-signed certificate SAN (config only).'),
-      lanCidrs: z.array(z.string()).optional()
-        .describe('LAN CIDRs treated as trusted (config only).'),
-      lanPasswordless: z.boolean().optional()
-        .describe('Allow LAN/loopback sources to skip login (config only).'),
-    }),
-    async execute(input: z.infer<typeof tool.schema>) {
-      const { command, port, dshPort, password, dshSecret, secureCookies, tlsEnabled, tlsDays, tlsHosts, lanCidrs, lanPasswordless } = input
+    parameters: {
+      command: {
+        type: 'string',
+        enum: ['status', 'enable', 'disable', 'restart', 'config'],
+        description: 'Action to perform (default: status).',
+      },
+      port: {
+        type: 'integer',
+        description: 'Port to bind (enable/config only).',
+      },
+      dshPort: {
+        type: 'integer',
+        description: 'Upstream DSH port (enable/config only).',
+      },
+      password: {
+        type: 'string',
+        description: 'Bridge password (config only; empty string clears).',
+      },
+      dshSecret: {
+        type: 'string',
+        description: 'DSH browser-session secret for auto-injecting DSH auth cookies (config only).',
+      },
+      secureCookies: {
+        type: 'boolean',
+        description: 'Add Secure flag to session cookies (config only).',
+      },
+      tlsEnabled: {
+        type: 'boolean',
+        description: 'Enable self-signed TLS / HTTPS listener (config only).',
+      },
+      tlsDays: {
+        type: 'integer',
+        description: 'Self-signed certificate validity in days (config only).',
+      },
+      tlsHosts: {
+        type: 'array',
+        items: { type: 'string' },
+        description: 'Hosts for the self-signed certificate SAN (config only).',
+      },
+      lanCidrs: {
+        type: 'array',
+        items: { type: 'string' },
+        description: 'LAN CIDRs treated as trusted (config only).',
+      },
+      lanPasswordless: {
+        type: 'boolean',
+        description: 'Allow LAN/loopback sources to skip login (config only).',
+      },
+    },
+    output: {
+      schema: {
+        type: 'object',
+        additionalProperties: false,
+        properties: {
+          ok: { type: 'boolean' },
+          message: { type: 'string' },
+        },
+      },
+      render(_args, value: ProxyBridgeResult) {
+        return [{ type: 'text', text: value.message }]
+      },
+    },
+    async execute(args: ProxyBridgeArgs): Promise<ProxyBridgeResult> {
+      const command = args.command ?? 'status'
+      const { port, dshPort, password, dshSecret, secureCookies, tlsEnabled, tlsDays, tlsHosts, lanCidrs, lanPasswordless } = args
 
       switch (command) {
         case 'status': {
@@ -315,14 +401,16 @@ export default function proxyBridgePlugin(ctx: Context): void {
           const proto = s.tls ? 'https' : 'http'
           return { ok: true, message: `Config updated. Bridge ${s.running ? 'running' : 'stopped'} on port ${s.port} (${proto}).` }
         }
+        default:
+          return { ok: false, message: `Unknown command: ${command}` }
       }
     },
-  }
+  })
 
-  ctx.tools.register(tool as any)
+  ctx.tools.register(tool)
 
   // Sync the bridge with the config on boot.
-  ctx.effect(() => {
+  ctx.fiber.effect(() => {
     if (controller.config.enabled) {
       void controller.start()
     }

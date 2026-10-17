@@ -1,9 +1,9 @@
 # Bundle patch for @painclown/dsh-proxy-bridge.
-# Registers the plugin in the DSH bundle. Disabled by default (safe):
-# the listener opens only after `proxy_bridge enable` or `enabled: true`.
-bundle:
-  plugins:
+# Registers the plugin in the DSH bundle.
+# Note: client module removed — DSH web client uses window.__ModuleLoader__.load()
+# format, not standard ESM. Config card can be added later with proper format.
+- insert:
     - id: dsh-proxy-bridge
+      name: '@painclown/dsh-proxy-bridge'
       entry: .
-      client: ./client
-      enabled: false
+      enabled: true
