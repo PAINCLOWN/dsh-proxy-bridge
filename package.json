@@ -22,6 +22,7 @@
   "scripts": {
     "build": "tsdown",
     "typecheck": "tsc -p tsconfig.json --noEmit",
+    "test": "node --experimental-strip-types --test src/proxy.test.ts",
     "prepack": "tsdown"
   },
   "dsh": {

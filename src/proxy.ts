@@ -73,6 +73,18 @@ export interface ProxyConfig {
   lanCidrs: readonly string[]
   /** Whether LAN/loopback sources may skip the gateway login (explicit opt-in). */
   lanPasswordless: boolean
+  /**
+   * WebSocket upgrade path whitelist. When non-empty, only these paths are
+   * relayed; all other WS upgrades are rejected with 404. Empty = allow all.
+   */
+  wsPaths: readonly string[]
+  /** Optional request logger for non-2xx responses. */
+  log?: (level: 'info' | 'warn' | 'error', message: string) => void
+  /**
+   * Path prefix rewrites applied to the upstream path. Each entry is
+   * [from, to] — the first match wins. Default: [['/sidebar/api/', '/api/']].
+   */
+  pathRewrites?: readonly (readonly [string, string])[]
   /** Optional injectable source classifier (integration tests emulate LAN/internet). */
   classifySource?: (req: http.IncomingMessage) => SourceClass
   /** Persistent state (cookie secret, password hash, session epoch). */
@@ -83,7 +95,6 @@ export interface ProxyConfig {
 
 /** Hop-by-hop headers a proxy must not forward (RFC 9110 §7.6.1). */
 const HOP_BY_HOP = new Set([
-  'connection',
   'keep-alive',
   'proxy-authenticate',
   'proxy-authorization',
@@ -93,19 +104,23 @@ const HOP_BY_HOP = new Set([
   'transfer-encoding',
 ])
 
+/** Headers that control the connection itself; kept only for WS upgrades. */
+const UPGRADE_HEADERS = new Set(['connection', 'upgrade'])
+
 /** Forwarding headers from the upstream proxy — drop them, we re-derive. */
-const FORWARDING_HEADERS = [
+const FORWARDING_HEADERS = new Set([
   'forwarded',
   'x-forwarded-for',
   'x-forwarded-host',
   'x-forwarded-port',
   'x-forwarded-proto',
   'x-real-ip',
-]
+])
 
 /**
  * Build the outbound headers for one relayed request: rewrite Host/Origin to
  * the loopback DSH port, drop hop-by-hop and caller-supplied forwarding headers.
+ * When `keepUpgrade` is true (WS upgrade), connection/upgrade headers are preserved.
  */
 export function buildUpstreamHeaders(
   headers: IncomingHttpHeaders,
@@ -117,13 +132,9 @@ export function buildUpstreamHeaders(
   if (typeof out.origin === 'string') {
     out.origin = `http://127.0.0.1:${dshPort}`
   }
-  delete out['proxy-connection']
-  for (const name of HOP_BY_HOP) {
-    if (name === 'connection' || name === 'upgrade') {
-      if (!keepUpgrade) delete out[name]
-    } else {
-      delete out[name]
-    }
+  for (const name of HOP_BY_HOP) delete out[name]
+  for (const name of UPGRADE_HEADERS) {
+    if (!keepUpgrade) delete out[name]
   }
   for (const name of FORWARDING_HEADERS) delete out[name]
   return out
@@ -164,11 +175,24 @@ export function generateDshCookie(dshPort: number, secretB64: string): string {
   return `${dshCookieName(authority)}=${value}`
 }
 
-/** Check if a request already carries a DSH auth cookie. */
-function hasDshCookie(req: http.IncomingMessage): boolean {
+/** Apply configured path rewrites to the upstream path. */
+function rewritePath(path: string, rewrites: readonly (readonly [string, string])[] | undefined): string {
+  if (!rewrites || rewrites.length === 0) return path
+  for (const [from, to] of rewrites) {
+    if (path.startsWith(from)) return to + path.slice(from.length)
+  }
+  return path
+}
+
+/** Check if a request already carries a DSH auth cookie (exact name match). */
+function hasDshCookie(req: http.IncomingMessage, dshPort: number): boolean {
   const cookieHeader = req.headers.cookie
   if (!cookieHeader) return false
-  return /dsh-auth-/.test(cookieHeader)
+  const expectedName = dshCookieName(`127.0.0.1:${dshPort}`)
+  return cookieHeader.split(';').some((segment) => {
+    const at = segment.indexOf('=')
+    return at !== -1 && segment.slice(0, at).trim() === expectedName
+  })
 }
 
 // --- Cookie helpers ---
@@ -196,6 +220,49 @@ function cookieValue(headerValue: string, name: string): string | undefined {
 }
 
 /**
+ * Simple circuit breaker for upstream DSH connections. After `threshold`
+ * consecutive failures the breaker opens for `cooldownMs`, short-circuiting
+ * requests with 503 instead of attempting new TCP connections.
+ */
+class CircuitBreaker {
+  private failures = 0
+  private state: 'closed' | 'open' | 'half-open' = 'closed'
+  private openedAt = 0
+  constructor(private readonly threshold: number, private readonly cooldownMs: number) {}
+
+  /** Returns true if the request should be allowed through. */
+  allow(): boolean {
+    if (this.state === 'closed') return true
+    if (this.state === 'open') {
+      if (Date.now() - this.openedAt >= this.cooldownMs) {
+        this.state = 'half-open'
+        return true
+      }
+      return false
+    }
+    // half-open: allow one probe
+    return true
+  }
+
+  recordSuccess(): void {
+    this.failures = 0
+    this.state = 'closed'
+  }
+
+  recordFailure(): void {
+    this.failures++
+    if (this.state === 'half-open' || this.failures >= this.threshold) {
+      this.state = 'open'
+      this.openedAt = Date.now()
+    }
+  }
+
+  get isOpen(): boolean {
+    return this.state === 'open'
+  }
+}
+
+/**
  * The bridge proxy server. Forwards HTTP requests and relays WebSocket
  * upgrades to the loopback DSH server. No same-site fence — the upstream
  * terminator (nginx) is trusted for access control.
@@ -205,6 +272,16 @@ export class ProxyBridge {
   private config: ProxyConfig
   private running = false
   private readonly rateLimiter = new RateLimiter(5, 60_000)
+  /** Keep-alive connection pool for upstream DSH requests. */
+  private readonly agent = new http.Agent({ keepAlive: true, maxSockets: 50, maxTotalSockets: 100 })
+  /** Circuit breaker: 5 consecutive failures → 30 s open. */
+  private readonly breaker = new CircuitBreaker(5, 30_000)
+  /** Active WebSocket sockets, destroyed on graceful shutdown. */
+  private readonly activeSockets = new Set<net.Socket>()
+  /** In-flight HTTP request count for graceful shutdown. */
+  private inFlight = 0
+  /** Basic metrics. */
+  private metrics = { requests: 0, totalLatencyMs: 0, wsConnections: 0 }
 
   constructor(config: ProxyConfig) {
     this.config = config
@@ -236,14 +313,37 @@ export class ProxyBridge {
     this.server = server
   }
 
-  /** Stop listening. Resolves when the server has closed. */
+  /**
+   * Graceful shutdown: stop accepting new connections, destroy active WS
+   * sockets, wait for in-flight HTTP requests to drain (up to 5 s), then
+   * tear down the connection pool.
+   */
   async close(): Promise<void> {
     if (!this.server) return
     this.running = false
+
+    // Destroy active WebSocket sockets so server.close() can complete.
+    for (const socket of this.activeSockets) {
+      socket.destroy()
+    }
+    this.activeSockets.clear()
+
+    // Stop accepting new connections; wait for in-flight HTTP to drain.
     await new Promise<void>((resolve) => {
-      this.server!.close(() => resolve())
+      const deadline = Date.now() + 5_000
+      const timer = setInterval(() => {
+        if (this.inFlight === 0 || Date.now() >= deadline) {
+          clearInterval(timer)
+          resolve()
+        }
+      }, 50)
+      this.server!.close(() => {
+        clearInterval(timer)
+        resolve()
+      })
     })
     this.server = null
+    this.agent.destroy()
   }
 
   /** Whether the server is currently listening. */
@@ -253,7 +353,8 @@ export class ProxyBridge {
 
   /** The bound port (useful when port 0 was requested). */
   get address(): net.AddressInfo | null {
-    return this.server?.address() ?? null
+    const addr = this.server?.address()
+    return addr && typeof addr === 'object' ? addr : null
   }
 
   // --- Auth helpers ---
@@ -295,6 +396,28 @@ export class ProxyBridge {
       // HSTS for HTTPS listeners.
       if (this.config.tls !== undefined) {
         res.setHeader('strict-transport-security', 'max-age=31536000; includeSubDomains')
+      }
+
+      // Health check — no auth required, for nginx upstream probes.
+      if (path === '/__bridge/health' && req.method === 'GET') {
+        const avgLatency = this.metrics.requests > 0
+          ? Math.round(this.metrics.totalLatencyMs / this.metrics.requests)
+          : 0
+        res.writeHead(200, { 'content-type': 'application/json' })
+        res.end(JSON.stringify({
+          ok: true,
+          uptime: Math.round(process.uptime()),
+          port: this.address?.port ?? this.config.port,
+          inFlight: this.inFlight,
+          wsConnections: this.activeSockets.size,
+          metrics: {
+            requests: this.metrics.requests,
+            avgLatencyMs: avgLatency,
+            wsConnectionsTotal: this.metrics.wsConnections,
+          },
+          circuitBreaker: this.breaker.isOpen ? 'open' : 'closed',
+        }))
+        return
       }
 
       // Login GET.
@@ -386,54 +509,86 @@ export class ProxyBridge {
 
   private forwardToDsh(req: http.IncomingMessage, res: http.ServerResponse): void {
     const { dshPort, dshSecret } = this.config
+    this.inFlight++
+    const startTime = Date.now()
+    // 'close' fires on normal completion and on client abort; 'finish' alone
+    // misses aborts and leaks inFlight. Guard so the counters update once.
+    let settled = false
+    const done = () => {
+      if (settled) return
+      settled = true
+      this.inFlight--
+      this.metrics.requests++
+      this.metrics.totalLatencyMs += Date.now() - startTime
+    }
+    res.on('close', done)
+    res.on('error', done)
 
-    const chunks: Buffer[] = []
-    req.on('data', (chunk: Buffer) => chunks.push(chunk))
-    req.on('end', () => {
-      const body = Buffer.concat(chunks)
-      const headers = buildUpstreamHeaders(req.headers, dshPort, false)
-
-      // Inject DSH auth cookie if the client doesn't already have one.
-      if (dshSecret && !hasDshCookie(req)) {
-        const dshCookie = generateDshCookie(dshPort, dshSecret)
-        headers.cookie = headers.cookie ? `${headers.cookie}; ${dshCookie}` : dshCookie
+    // Circuit breaker: short-circuit when upstream is down.
+    if (!this.breaker.allow()) {
+      if (!res.headersSent) {
+        res.writeHead(503, { 'content-type': 'text/plain', 'retry-after': '30' })
       }
+      res.end('Service Unavailable: upstream DSH is down (circuit open)')
+      return
+    }
 
-      if (body.length > 0) {
-        headers['content-length'] = String(body.length)
-      }
+    const headers = buildUpstreamHeaders(req.headers, dshPort, false)
 
-      // Rewrite client-side routing prefixes that DSH's server doesn't recognize.
-      // The sidebar plugin calls /sidebar/api/... but the server API is at /api/...
-      let upstreamPath = req.url ?? '/'
-      if (upstreamPath.startsWith('/sidebar/api/')) {
-        upstreamPath = upstreamPath.replace('/sidebar/api/', '/api/')
-      }
+    // Inject DSH auth cookie if the client doesn't already have one.
+    if (dshSecret && !hasDshCookie(req, dshPort)) {
+      const dshCookie = generateDshCookie(dshPort, dshSecret)
+      headers.cookie = headers.cookie ? `${headers.cookie}; ${dshCookie}` : dshCookie
+    }
 
-      const upstreamReq = http.request(
-        {
-          hostname: '127.0.0.1',
-          port: dshPort,
-          path: upstreamPath,
-          method: req.method,
-          headers,
-        },
-        (upstreamRes) => {
-          const resHeaders: OutgoingHttpHeaders = { ...upstreamRes.headers }
-          delete resHeaders['transfer-encoding']
-          res.writeHead(upstreamRes.statusCode ?? 502, resHeaders)
-          upstreamRes.pipe(res)
-        },
-      )
-      upstreamReq.on('error', (err: Error) => {
-        if (!res.headersSent) {
-          res.writeHead(502, { 'content-type': 'text/plain' })
+    // Apply configured path rewrites.
+    const upstreamPath = rewritePath(req.url ?? '/', this.config.pathRewrites)
+
+    // Zero-copy: pipe the request body straight through instead of buffering
+    // it in memory. This keeps large uploads from exhausting heap.
+    const upstreamReq = http.request(
+      {
+        hostname: '127.0.0.1',
+        port: dshPort,
+        path: upstreamPath,
+        method: req.method,
+        headers,
+        agent: this.agent,
+      },
+      (upstreamRes) => {
+        const status = upstreamRes.statusCode ?? 502
+        if (status < 500) this.breaker.recordSuccess()
+        else this.breaker.recordFailure()
+        if (status >= 400) {
+          this.config.log?.('warn', `${req.method} ${upstreamPath} → ${status}`)
         }
-        res.end(`Bad Gateway: ${err.message}`)
-      })
-      if (body.length > 0) upstreamReq.write(body)
-      upstreamReq.end()
+        const resHeaders: OutgoingHttpHeaders = { ...upstreamRes.headers }
+        delete resHeaders['transfer-encoding']
+        res.writeHead(status, resHeaders)
+        upstreamRes.pipe(res)
+        // Client went away mid-response: drop the upstream socket so it
+        // returns to (or leaves) the pool instead of being held open.
+        res.on('close', () => {
+          if (!upstreamRes.complete) upstreamRes.destroy()
+        })
+      },
+    )
+    // Client aborted before the upstream finished: cancel the upstream request.
+    res.on('close', () => {
+      if (!res.writableFinished) upstreamReq.destroy()
     })
+    upstreamReq.on('error', (err: Error) => {
+      this.breaker.recordFailure()
+      if (!res.headersSent) {
+        res.writeHead(502, { 'content-type': 'text/plain' })
+      }
+      res.end(`Bad Gateway: ${err.message}`)
+      req.destroy()
+    })
+    req.on('error', () => {
+      upstreamReq.destroy()
+    })
+    req.pipe(upstreamReq)
   }
 
   // --- WebSocket upgrade relay ---
@@ -446,19 +601,27 @@ export class ProxyBridge {
         return
       }
 
-      const { dshPort, dshSecret } = this.config
+      const { dshPort, dshSecret, wsPaths, pathRewrites } = this.config
+
+      // Apply configured path rewrites for WS upgrades too.
+      const upstreamPath = rewritePath(req.url ?? '/', pathRewrites)
+
+      // WS path whitelist: reject paths not in the allow-list.
+      if (wsPaths.length > 0) {
+        const pathname = new URL(upstreamPath, 'http://bridge.invalid').pathname
+        if (!wsPaths.includes(pathname)) {
+          socket.write('HTTP/1.1 404 Not Found\r\nConnection: close\r\n\r\n')
+          socket.end()
+          return
+        }
+      }
+
       const headers = buildUpstreamHeaders(req.headers, dshPort, true)
 
       // Inject DSH auth cookie for WS upgrades.
-      if (dshSecret && !hasDshCookie(req)) {
+      if (dshSecret && !hasDshCookie(req, dshPort)) {
         const dshCookie = generateDshCookie(dshPort, dshSecret)
         headers.cookie = headers.cookie ? `${headers.cookie}; ${dshCookie}` : dshCookie
-      }
-
-      // Rewrite client-side routing prefixes for WS upgrades too.
-      let upstreamPath = req.url ?? '/'
-      if (upstreamPath.startsWith('/sidebar/api/')) {
-        upstreamPath = upstreamPath.replace('/sidebar/api/', '/api/')
       }
 
       // Build the raw upgrade request.
@@ -506,6 +669,14 @@ export class ProxyBridge {
         }
       }
       upstream.on('data', onData)
+
+      // Track the socket for graceful shutdown and metrics.
+      const wsSocket = socket as net.Socket
+      this.activeSockets.add(wsSocket)
+      this.metrics.wsConnections++
+      const cleanup = () => this.activeSockets.delete(wsSocket)
+      wsSocket.on('close', cleanup)
+      ;(upstream as net.Socket).on('close', cleanup)
 
       upstream.on('error', (err: Error) => {
         if (!socket.destroyed) {

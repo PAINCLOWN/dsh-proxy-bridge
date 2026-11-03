@@ -2,6 +2,11 @@
 /**
  * Standalone DSH proxy bridge — minimal reverse proxy with auth.
  * Listens on 0.0.0.0:3083, forwards to 127.0.0.1:3080.
+ *
+ * NOTE: This is a standalone version for testing/debugging outside the DSH
+ * plugin framework. The production plugin lives in src/ (TypeScript). Core
+ * logic (auth, state, proxy) is duplicated here for standalone use. Keep
+ * changes in sync with src/ when modifying core behavior.
  */
 import http from 'node:http'
 import net from 'node:net'
@@ -10,11 +15,12 @@ import fs from 'node:fs'
 import path from 'node:path'
 import os from 'node:os'
 
-const PORT = 3083
-const DSH_PORT = 3080
-const DSH_HOST = '127.0.0.1'
-const PASSWORD = 'dsh2026'
-const DSH_SECRET = 'vGIxivMEJblP1teRqVymk6sefy7wHMzxds9T0Unv6rE'
+const PORT = Number(process.env.BRIDGE_PORT) || 3083
+const DSH_PORT = Number(process.env.DSH_PORT) || 3080
+const DSH_HOST = process.env.DSH_HOST || '127.0.0.1'
+// Password and DSH secret are read from the state file (scrypt hash) and
+// environment variable respectively. Never hardcode secrets in source.
+const DSH_SECRET = process.env.DSH_SECRET || ''
 const COOKIE_NAME = 'dsh-bridge-session'
 const COOKIE_MAX_AGE_DAYS = 7
 const STATE_PATH = path.join(os.homedir(), '.dsh', 'proxy-bridge', 'state.json')
@@ -327,9 +333,11 @@ function handleHttp(req, res) {
     req.on('end', () => {
       const params = new URLSearchParams(body)
       const pw = params.get('password') || ''
-      // Simple password check (scrypt hash in state)
-      const hash = crypto.scryptSync(pw, 'dsh-bridge', 64).toString('hex')
-      if (hash === (state.password?.hash || '')) {
+      // Verify against the scrypt hash stored in state (random salt per password).
+      const pwOk = state.password
+        ? crypto.scryptSync(pw, Buffer.from(state.password.salt, 'hex'), 64).toString('hex') === state.password.hash
+        : false
+      if (pwOk) {
         const sid = crypto.randomBytes(16).toString('hex')
         const cookie = signSessionCookie(sid)
         res.writeHead(302, {
@@ -439,6 +447,9 @@ function handleUpgrade(req, socket, head) {
 }
 
 // --- Start server ---
+if (!DSH_SECRET) {
+  console.warn('[bridge] WARNING: DSH_SECRET env var not set — DSH auth cookie injection disabled.')
+}
 const server = http.createServer(handleHttp)
 server.on('upgrade', handleUpgrade)
 server.listen(PORT, '0.0.0.0', () => {

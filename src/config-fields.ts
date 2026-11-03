@@ -66,6 +66,9 @@ export const BridgeConfig = z.object({
   lanCidrs: z.array(z.string()).default([]),
   /** Whether LAN/loopback sources may skip the gateway login (explicit opt-in). */
   lanPasswordless: z.boolean().default(false),
+  /** WebSocket upgrade path whitelist (empty = allow all). */
+  wsPaths: z.array(z.string()).default(['/api/remote.mux']),
+  pathRewrites: z.array(z.tuple([z.string(), z.string()])).default([['/sidebar/api/', '/api/']]),
 })
 
 export type BridgeConfigValue = z.infer<typeof BridgeConfig>
@@ -85,6 +88,8 @@ export const CONFIG_FIELD_KEYS = [
   'tlsHosts',
   'lanCidrs',
   'lanPasswordless',
+  'wsPaths',
+  'pathRewrites',
 ] as const
 
 /** Keys that may be omitted (have defaults). */
@@ -99,4 +104,6 @@ export const OPTIONAL_CONFIG_KEYS = [
   'tlsHosts',
   'lanCidrs',
   'lanPasswordless',
+  'wsPaths',
+  'pathRewrites',
 ] as const

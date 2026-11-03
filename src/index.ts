@@ -108,6 +108,8 @@ export function createController(ctx: Context, initialConfig?: Partial<BridgeCon
     tlsHosts: [],
     lanCidrs: [],
     lanPasswordless: false,
+    wsPaths: ['/api/remote.mux'],
+    pathRewrites: [['/sidebar/api/', '/api/']],
     ...initialConfig,
   }
   let state: BridgeState = loadState()
@@ -167,6 +169,9 @@ export function createController(ctx: Context, initialConfig?: Partial<BridgeCon
       tls,
       lanCidrs: config.lanCidrs,
       lanPasswordless: config.lanPasswordless,
+      wsPaths: config.wsPaths,
+      pathRewrites: config.pathRewrites,
+      log: (level, message) => ctx.logger[level === 'error' ? 'error' : level === 'warn' ? 'warn' : 'info'](`[proxy-bridge] ${message}`),
       state,
       onStateChange: (newState: BridgeState) => {
         state = newState
@@ -272,6 +277,8 @@ export default function proxyBridgePlugin(ctx: Context, config?: Partial<BridgeC
     tlsHosts?: string[]
     lanCidrs?: string[]
     lanPasswordless?: boolean
+    wsPaths?: string[]
+    pathRewrites?: [string, string][]
   }
   interface ProxyBridgeResult {
     ok: boolean
@@ -358,6 +365,16 @@ export default function proxyBridgePlugin(ctx: Context, config?: Partial<BridgeC
         type: 'boolean',
         description: 'Allow LAN/loopback sources to skip login (config only).',
       },
+      wsPaths: {
+        type: 'array',
+        items: { type: 'string' },
+        description: 'WebSocket upgrade path whitelist (config only; empty = allow all). Default: ["/api/remote.mux"].',
+      },
+      pathRewrites: {
+        type: 'array',
+        items: { type: 'array', items: { type: 'string' } },
+        description: 'Path prefix rewrites [from, to] (config only). Default: [["/sidebar/api/", "/api/"]].',
+      },
     },
     output: {
       schema: {
@@ -374,7 +391,7 @@ export default function proxyBridgePlugin(ctx: Context, config?: Partial<BridgeC
     },
     async execute(args: ProxyBridgeArgs): Promise<ProxyBridgeResult> {
       const command = args.command ?? 'status'
-      const { port, dshPort, password, dshSecret, secureCookies, tlsEnabled, tlsDays, tlsHosts, lanCidrs, lanPasswordless } = args
+      const { port, dshPort, password, dshSecret, secureCookies, tlsEnabled, tlsDays, tlsHosts, lanCidrs, lanPasswordless, wsPaths, pathRewrites } = args
 
       switch (command) {
         case 'status': {
@@ -424,6 +441,8 @@ export default function proxyBridgePlugin(ctx: Context, config?: Partial<BridgeC
           if (tlsHosts !== undefined) updates.tlsHosts = tlsHosts
           if (lanCidrs !== undefined) updates.lanCidrs = lanCidrs
           if (lanPasswordless !== undefined) updates.lanPasswordless = lanPasswordless
+          if (wsPaths !== undefined) updates.wsPaths = wsPaths
+          if (pathRewrites !== undefined) updates.pathRewrites = pathRewrites
           await controller.updateConfig(updates)
           const s = controller.status()
           const proto = s.tls ? 'https' : 'http'
