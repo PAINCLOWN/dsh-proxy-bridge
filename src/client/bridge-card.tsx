@@ -342,6 +342,20 @@ export function BridgeCard(_props: Record<string, never>): React.JSX.Element {
           <div style={{ flex: 1 }}>
             <div style={{ display: 'flex', alignItems: 'center', gap: 10 }}>
               <h3 style={S.title}>Proxy Bridge</h3>
+              <span
+                style={{
+                  fontSize: 10,
+                  fontWeight: 600,
+                  padding: '2px 7px',
+                  borderRadius: 4,
+                  background: C.accentSoft,
+                  color: C.accent,
+                  fontFamily: 'ui-monospace, monospace',
+                  letterSpacing: '0.03em',
+                }}
+              >
+                v2.0
+              </span>
               {statusBadge}
             </div>
           </div>
