@@ -1,28 +1,43 @@
 # @painclown/dsh-proxy-bridge
 
-轻量级 DSH 反向代理桥，专为 nginx 等 TLS 终结反代后面的 WebSocket 转发设计。
+轻量级 DeepSeek Harness (DSH) 反向代理桥插件，专为 nginx 等 TLS 终结反向代理后的 WebSocket 转发场景设计。
 
-> 理念参考 [@riceawa/dsh-lan-gateway](https://github.com/rice-awa/dsh-lan-gateway)，感谢 riceawa 的启发。
+> 本插件理念参考 [@riceawa/dsh-lan-gateway](https://github.com/rice-awa/dsh-lan-gateway)，感谢 riceawa 的启发。
+
+## 目录
+
+- [解决什么问题](#解决什么问题)
+- [架构](#架构)
+- [安装](#安装)
+- [快速开始](#快速开始)
+- [命令参考](#命令参考)
+- [配置字段](#配置字段)
+- [安全特性](#安全特性)
+- [文件结构](#文件结构)
+- [nginx 配置示例](#nginx-配置示例)
+- [开发](#开发)
+- [与 dsh-lan-gateway 的区别](#与-dsh-lan-gateway-的区别)
+- [License](#license)
 
 ## 解决什么问题
 
-DSH Web GUI 的 WebSocket 连接在通过 nginx → 网关 → DSH 链路时会因 Origin/Host 不匹配返回 403。本插件跳过 same-site 检查，信任上游终结器（nginx）做访问控制，直接转发 HTTP + WebSocket 到 DSH。
+DSH Web GUI 的 WebSocket 连接在通过 `nginx → 网关 → DSH` 链路时，会因 Origin/Host 不匹配而返回 403。本插件跳过 same-site 检查，信任上游终结器（nginx）做访问控制，直接转发 HTTP + WebSocket 到 DSH。
 
 ## 架构
 
 ```
 浏览器 ──HTTPS──> nginx (TLS 终结) ──HTTP──> Bridge (0.0.0.0:3083) ──HTTP──> DSH (127.0.0.1:3080)
-                                              │
-                                              ├── 密码门 (可选)
-                                              ├── DSH Cookie 自动注入
-                                              ├── WebSocket 透传 (raw TCP splice)
-                                              └── 速率限制 / 会话撤销
+                                               │
+                                               ├── 密码门 (可选)
+                                               ├── DSH Cookie 自动注入
+                                               ├── WebSocket 透传 (raw TCP splice)
+                                               └── 速率限制 / 会话撤销
 ```
 
-- **HTTP**: 转发时重写 Host/Origin 到 `127.0.0.1:3080`
-- **WebSocket**: socket 直接 splice 到上游，无 same-site 检查
-- **密码门**: 可选的第二层认证（在 nginx 之上）
-- **DSH Cookie 注入**: 自动为请求注入 DSH 认证 Cookie，无需手动处理 DSH 登录
+- **HTTP**：转发时重写 Host/Origin 到 `127.0.0.1:3080`
+- **WebSocket**：socket 直接 splice 到上游，无 same-site 检查
+- **密码门**：可选的第二层认证（在 nginx 之上）
+- **DSH Cookie 注入**：自动为请求注入 DSH 认证 Cookie，无需手动处理 DSH 登录
 
 ## 安装
 
@@ -37,21 +52,21 @@ npm install @painclown/dsh-proxy-bridge
 
 ## 快速开始
 
-```
+```bash
 # 1. 启用桥（默认 3083 → 3080）
 proxy_bridge enable
 
-# 2. 设置密码
-proxy_bridge config password=dsh2026
+# 2. 设置密码（至少 8 位）
+proxy_bridge config password=<your-password>
 
 # 3. 配置 DSH Secret（从 ~/.dsh/.credentials.yaml 读取）
-proxy_bridge config dshSecret=<your-secret>
+proxy_bridge config dshSecret=<your-dsh-secret>
 
 # 4. 检查状态
 proxy_bridge status
 ```
 
-## 命令
+## 命令参考
 
 | 命令 | 说明 |
 |------|------|
@@ -63,18 +78,18 @@ proxy_bridge status
 
 ### 配置示例
 
-```
+```bash
 # 设置密码（至少 8 位）
-proxy_bridge config password=dsh2026
+proxy_bridge config password=<your-password>
 
 # 配置 DSH Secret（自动注入 DSH 认证 Cookie）
-proxy_bridge config dshSecret=vGIxivMEJblP1teRqVymk6sefy7wHMzxds9T0Unv6rE
+proxy_bridge config dshSecret=<your-dsh-secret>
 
 # 启用自签名 TLS
-proxy_bridge config tlsEnabled=true tlsHosts=["dsh.poxx.top","192.168.123.254"]
+proxy_bridge config tlsEnabled=true tlsHosts=["<your-domain>","<your-ip>"]
 
 # 允许 LAN 免登录
-proxy_bridge config lanPasswordless=true lanCidrs=["192.168.123.0/24"]
+proxy_bridge config lanPasswordless=true lanCidrs=["<your-lan-cidr>"]
 
 # 清除密码
 proxy_bridge config password=
@@ -134,8 +149,8 @@ proxy_bridge config password=
 
 ```nginx
 server {
-    listen 11007 ssl;
-    server_name dsh.poxx.top;
+    listen <your-port> ssl;
+    server_name <your-domain>;
 
     ssl_certificate     /path/to/cert.pem;
     ssl_certificate_key /path/to/key.pem;
@@ -164,8 +179,8 @@ server {
 npx tsdown
 
 # 部署到 DSH profile
-rm -rf ~/.dsh/profiles/web/node_modules/@riceawa/dsh-proxy-bridge/lib/
-cp -r lib/ ~/.dsh/profiles/web/node_modules/@riceawa/dsh-proxy-bridge/lib/
+rm -rf ~/.dsh/profiles/web/node_modules/@painclown/dsh-proxy-bridge/lib/
+cp -r lib/ ~/.dsh/profiles/web/node_modules/@painclown/dsh-proxy-bridge/lib/
 ```
 
 ### 源码结构

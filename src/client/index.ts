@@ -1,17 +1,19 @@
 /**
  * Client entry point for the DSH proxy bridge plugin.
- * Registers the config card on the DSH Plugins page.
+ * Registers the config card on the DSH Plugins page (Installed plugins section).
  *
  * @module @painclown/dsh-proxy-bridge/client
  */
 
-import type { ClientContext } from '@deepseek-ai/cordis'
 import { BridgeCard } from './bridge-card.tsx'
 
-export default function proxyBridgeClient(ctx: ClientContext): void {
-  // Register the config card in the plugins bundle config slot.
-  ctx.slots?.register?.('plugins.bundle.config', {
-    id: 'proxy-bridge-config',
-    component: BridgeCard,
-  })
+const inject = ['slots']
+
+function apply(ctx: any): void {
+  ctx.slots.inject('plugins.bundle.config', () => ctx.slots.register({
+    name: 'plugins.bundle.config',
+    key: '@painclown/dsh-proxy-bridge',
+  }, BridgeCard))
 }
+
+export { apply, inject }

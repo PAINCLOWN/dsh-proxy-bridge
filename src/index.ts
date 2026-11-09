@@ -306,7 +306,7 @@ export default function proxyBridgePlugin(ctx: Context, config?: Partial<BridgeC
         '- secureCookies: add Secure flag to session cookies (enable when behind HTTPS).',
         '- tlsEnabled: enable self-signed TLS on the bridge (default false).',
         '- tlsDays: self-signed cert validity in days (default 365).',
-        '- tlsHosts: SAN hostnames for the self-signed cert (e.g. ["dsh.poxx.top", "192.168.123.99"]).',
+        '- tlsHosts: SAN hostnames for the self-signed cert (e.g. ["example.com", "192.168.1.100"]).',
         '- lanCidrs: LAN CIDRs treated as trusted (e.g. ["192.168.0.0/16"]).',
         '- lanPasswordless: allow LAN/loopback sources to skip the bridge login (default false).',
         '',
@@ -314,7 +314,7 @@ export default function proxyBridgePlugin(ctx: Context, config?: Partial<BridgeC
         '- "Is the bridge up?" → status',
         '- "Start/stop the bridge" → enable / disable',
         '- "Change the port to 3084" → config port:3084, then restart',
-        '- "Enable TLS for dsh.poxx.top" → config tlsEnabled:true tlsHosts:["dsh.poxx.top"] secureCookies:true, then restart',
+        '- "Enable TLS for example.com" → config tlsEnabled:true tlsHosts:["example.com"] secureCookies:true, then restart',
         '- "WS 403 through the proxy" → check status first; the bridge only forwards /api/remote.mux WS upgrades; verify dshSecret is set for cookie injection.',
       ].join('\n'),
     parameters: {

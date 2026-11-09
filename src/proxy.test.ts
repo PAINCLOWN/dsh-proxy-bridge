@@ -1,22 +1,22 @@
 /**
  * Unit tests for the proxy bridge core logic.
  *
- * Run with: node --experimental-strip-types --test src/proxy.test.ts
+ * Run with: node --experimental-transform-types --test src/proxy.test.ts
  */
 
 import { describe, it } from 'node:test'
 import assert from 'node:assert/strict'
 import {
   buildUpstreamHeaders,
-} from './proxy'
+} from './proxy.ts'
 import {
   signCookie,
   verifySession,
   RateLimiter,
   classifySource,
   parseIpv4,
-} from './auth'
-import type { BridgeState } from './state'
+} from './auth.ts'
+import type { BridgeState } from './state.ts'
 
 // --- Cookie sign/verify ---
 
@@ -125,13 +125,13 @@ describe('buildUpstreamHeaders', () => {
 
   it('strips hop-by-hop headers', () => {
     const headers = buildUpstreamHeaders(
-      { connection: 'keep-alive', upgrade: 'websocket', keepalive: 'timeout=5' },
+      { connection: 'keep-alive', upgrade: 'websocket', 'keep-alive': 'timeout=5' },
       3080,
       false,
     )
     assert.equal(headers.connection, undefined)
     assert.equal(headers.upgrade, undefined)
-    assert.equal(headers.keepalive, undefined)
+    assert.equal(headers['keep-alive'], undefined)
   })
 
   it('keeps upgrade headers when keepUpgrade is true', () => {

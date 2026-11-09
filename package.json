@@ -11,6 +11,7 @@
       "types": "./lib/index.d.mts",
       "default": "./lib/index.mjs"
     },
+    "./client": "./lib/client.js",
     "./cordis.patch.yml": "./cordis.patch.yml",
     "./package.json": "./package.json"
   },
@@ -20,14 +21,20 @@
     "cordis.patch.yml"
   ],
   "scripts": {
-    "build": "tsdown",
+    "build": "tsdown && tsdown -c tsdown.client.config.ts && node scripts/wrap-client.mjs",
     "typecheck": "tsc -p tsconfig.json --noEmit",
-    "test": "node --experimental-strip-types --test src/proxy.test.ts",
-    "prepack": "tsdown"
+    "test": "node --experimental-transform-types --test src/proxy.test.ts",
+    "prepack": "pnpm build"
   },
   "dsh": {
     "bundle": {
       "patch": "./cordis.patch.yml"
+    },
+    "client": {
+      "platform": "web",
+      "inject": [
+        "@deepseek-ai/dsh-client-ui-settings-plugins"
+      ]
     }
   },
   "peerDependencies": {

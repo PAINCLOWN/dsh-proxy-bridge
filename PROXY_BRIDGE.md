@@ -25,7 +25,7 @@ Bridge 监听 `0.0.0.0:3083`，将 HTTP + WebSocket 转发到 DSH web 服务器�
 | `secureCookies` | boolean | false | 为会话 cookie 添加 Secure 标志（HTTPS 后启用） |
 | `tlsEnabled` | boolean | false | 在 bridge 上启用自签名 TLS |
 | `tlsDays` | number | 365 | 自签名证书有效期（天） |
-| `tlsHosts` | string[] | [] | 自签名证书 SAN 主机名，如 `["dsh.poxx.top"]` |
+| `tlsHosts` | string[] | [] | 自签名证书 SAN 主机名，如 `["example.com"]` |
 | `lanCidrs` | string[] | [] | 受信任的局域网 CIDR，如 `["192.168.0.0/16"]` |
 | `lanPasswordless` | boolean | false | 允许局域网/回环源跳过 bridge 登录 |
 
@@ -44,7 +44,7 @@ proxy_bridge config port: 3084
 proxy_bridge restart
 
 # 启用 TLS
-proxy_bridge config tlsEnabled: true tlsHosts: ["dsh.poxx.top"] secureCookies: true
+proxy_bridge config tlsEnabled: true tlsHosts: ["example.com"] secureCookies: true
 proxy_bridge restart
 
 # 设置 DSH 密钥（自动注入认证 cookie）
@@ -63,7 +63,7 @@ proxy_bridge config lanCidrs: ["192.168.0.0/16"] lanPasswordless: true
 ## 架构
 
 ```
-Internet/LAN → nginx (TLS 443/11007) → gateway (3081) → bridge (3083) → DSH (3080)
+Internet/LAN → nginx (TLS) → bridge (3083) → DSH (3080)
 ```
 
 - Bridge 信任上游终结器（nginx），跳过严格的 same-site 检查，WS 升级干净中继

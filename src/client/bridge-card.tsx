@@ -1,5 +1,6 @@
 /**
  * The proxy bridge configuration card for the DSH Plugins page.
+ * Supports Chinese / English bilingual switching.
  *
  * @module @painclown/dsh-proxy-bridge/client/bridge-card
  */
@@ -12,6 +13,79 @@ interface BridgeStatus {
   dshPort: number
   hasPassword: boolean
   tls: boolean
+}
+
+type Lang = 'zh' | 'en'
+
+/* ── i18n ──────────────────────────────────────────────────────────── */
+
+const T: Record<Lang, Record<string, string>> = {
+  en: {
+    title: 'Proxy Bridge',
+    subtitle: 'Lightweight reverse proxy for nginx → DSH. Relays HTTP + WebSocket without the same-site fence that breaks WS through nginx.',
+    basic: 'Basic',
+    bridgePort: 'Bridge port',
+    dshPort: 'DSH port',
+    password: 'Password (optional, min 8 chars)',
+    passwordPlaceholder: 'Leave empty for no password',
+    dshSecret: 'DSH secret (auto-inject auth cookies)',
+    dshSecretPlaceholder: 'Base64url DSH browser-session secret',
+    tls: 'TLS',
+    enableTls: 'Enable self-signed TLS',
+    sanHosts: 'SAN hosts (comma-separated)',
+    sanHostsPlaceholder: 'dsh.example.com, 192.168.1.100',
+    certValidity: 'Cert validity (days)',
+    lan: 'LAN',
+    lanCidrs: 'LAN CIDRs (comma-separated)',
+    lanCidrsPlaceholder: '192.168.0.0/16, 10.0.0.0/8',
+    lanPasswordless: 'LAN passwordless (skip login for LAN / loopback)',
+    websocket: 'WebSocket',
+    wsPaths: 'WS path whitelist (comma-separated; empty = allow all)',
+    wsPathsPlaceholder: '/api/remote.mux',
+    enable: 'Enable',
+    enabled: '✓ Enabled',
+    disable: 'Disable',
+    saveConfig: 'Save Config',
+    saving: 'Saving…',
+    running: 'Running',
+    stopped: 'Stopped',
+    ok: 'OK',
+    failed: 'Failed',
+    error: 'Error',
+  },
+  zh: {
+    title: '代理桥',
+    subtitle: '轻量级反向代理，用于 nginx → DSH。中继 HTTP + WebSocket，避免 nginx 同源策略导致的 WS 中断。',
+    basic: '基础配置',
+    bridgePort: '桥端口',
+    dshPort: 'DSH 端口',
+    password: '密码（可选，至少 8 位）',
+    passwordPlaceholder: '留空则不设密码',
+    dshSecret: 'DSH 密钥（自动注入认证 Cookie）',
+    dshSecretPlaceholder: 'Base64url 编码的 DSH 浏览器会话密钥',
+    tls: 'TLS',
+    enableTls: '启用自签名 TLS',
+    sanHosts: 'SAN 主机（逗号分隔）',
+    sanHostsPlaceholder: 'dsh.example.com, 192.168.1.100',
+    certValidity: '证书有效期（天）',
+    lan: '局域网',
+    lanCidrs: '局域网 CIDR（逗号分隔）',
+    lanCidrsPlaceholder: '192.168.0.0/16, 10.0.0.0/8',
+    lanPasswordless: '局域网免密（LAN / 回环地址跳过登录）',
+    websocket: 'WebSocket',
+    wsPaths: 'WS 路径白名单（逗号分隔；留空 = 允许全部）',
+    wsPathsPlaceholder: '/api/remote.mux',
+    enable: '启用',
+    enabled: '✓ 已启用',
+    disable: '停用',
+    saveConfig: '保存配置',
+    saving: '保存中…',
+    running: '运行中',
+    stopped: '已停止',
+    ok: '成功',
+    failed: '失败',
+    error: '错误',
+  },
 }
 
 function inputValue(e: React.FormEvent<HTMLInputElement>): string {
@@ -202,11 +276,33 @@ const S = {
     fontFamily: 'ui-monospace, monospace',
     borderTop: `1px solid ${C.border}`,
   } as React.CSSProperties,
+
+  langToggle: {
+    display: 'flex',
+    gap: 0,
+    borderRadius: 6,
+    overflow: 'hidden',
+    border: `1px solid ${C.border}`,
+  } as React.CSSProperties,
+
+  langBtn: (active: boolean): React.CSSProperties => ({
+    padding: '3px 10px',
+    fontSize: 11,
+    fontWeight: 600,
+    border: 'none',
+    cursor: 'pointer',
+    transition: 'background 0.2s, color 0.2s',
+    background: active ? C.accent : 'transparent',
+    color: active ? '#fff' : C.textDim,
+  }),
 }
 
 /* ── Component ─────────────────────────────────────────────────────── */
 
 export function BridgeCard(_props: Record<string, never>): React.JSX.Element {
+  const [lang, setLang] = useState<Lang>(() => {
+    try { return (localStorage.getItem('dsh-bridge-lang') as Lang) || 'zh' } catch { return 'zh' }
+  })
   const [enabled, setEnabled] = useState(false)
   const [port, setPort] = useState(3083)
   const [dshPort, setDshPort] = useState(3080)
@@ -221,6 +317,13 @@ export function BridgeCard(_props: Record<string, never>): React.JSX.Element {
   const [status, setStatus] = useState<string>('')
   const [bridgeStatus, setBridgeStatus] = useState<BridgeStatus | null>(null)
   const [busy, setBusy] = useState(false)
+
+  const t = T[lang]
+
+  const switchLang = useCallback((l: Lang) => {
+    setLang(l)
+    try { localStorage.setItem('dsh-bridge-lang', l) } catch { /* noop */ }
+  }, [])
 
   // Poll bridge status every 5 s.
   useEffect(() => {
@@ -255,13 +358,13 @@ export function BridgeCard(_props: Record<string, never>): React.JSX.Element {
         body: JSON.stringify({ command, ...extra }),
       })
       const data = await res.json() as { ok: boolean; message: string }
-      setStatus(data.message ?? (data.ok ? 'OK' : 'Failed'))
+      setStatus(data.message ?? (data.ok ? t.ok : t.failed))
     } catch (err) {
-      setStatus(`Error: ${String(err)}`)
+      setStatus(`${t.error}: ${String(err)}`)
     } finally {
       setBusy(false)
     }
-  }, [])
+  }, [t])
 
   const handleEnable = useCallback(() => {
     setEnabled(true)
@@ -312,7 +415,7 @@ export function BridgeCard(_props: Record<string, never>): React.JSX.Element {
           animation: bridgeStatus.running ? 'pulse 2s infinite' : 'none',
         }}
       />
-      {bridgeStatus.running ? 'Running' : 'Stopped'}
+      {bridgeStatus.running ? t.running : t.stopped}
     </span>
   )
 
@@ -341,7 +444,7 @@ export function BridgeCard(_props: Record<string, never>): React.JSX.Element {
           </div>
           <div style={{ flex: 1 }}>
             <div style={{ display: 'flex', alignItems: 'center', gap: 10 }}>
-              <h3 style={S.title}>Proxy Bridge</h3>
+              <h3 style={S.title}>{t.title}</h3>
               <span
                 style={{
                   fontSize: 10,
@@ -359,11 +462,25 @@ export function BridgeCard(_props: Record<string, never>): React.JSX.Element {
               {statusBadge}
             </div>
           </div>
+          {/* Language toggle */}
+          <div style={S.langToggle}>
+            <button
+              onClick={() => switchLang('zh')}
+              style={S.langBtn(lang === 'zh')}
+              title="中文"
+            >
+              中
+            </button>
+            <button
+              onClick={() => switchLang('en')}
+              style={S.langBtn(lang === 'en')}
+              title="English"
+            >
+              EN
+            </button>
+          </div>
         </div>
-        <p style={S.subtitle}>
-          Lightweight reverse proxy for nginx → DSH. Relays HTTP + WebSocket
-          without the same-site fence that breaks WS through nginx.
-        </p>
+        <p style={S.subtitle}>{t.subtitle}</p>
       </div>
 
       {/* Body */}
@@ -372,12 +489,12 @@ export function BridgeCard(_props: Record<string, never>): React.JSX.Element {
         <div style={S.section}>
           <div style={S.sectionHeader}>
             <div style={S.sectionIcon}>⚙</div>
-            <span style={S.sectionTitle}>Basic</span>
+            <span style={S.sectionTitle}>{t.basic}</span>
           </div>
           <div style={S.sectionBody}>
             <div style={S.fieldRow}>
               <div style={S.field}>
-                <label style={S.label}>Bridge port</label>
+                <label style={S.label}>{t.bridgePort}</label>
                 <input
                   type="number"
                   value={port}
@@ -388,7 +505,7 @@ export function BridgeCard(_props: Record<string, never>): React.JSX.Element {
                 />
               </div>
               <div style={S.field}>
-                <label style={S.label}>DSH port</label>
+                <label style={S.label}>{t.dshPort}</label>
                 <input
                   type="number"
                   value={dshPort}
@@ -400,21 +517,21 @@ export function BridgeCard(_props: Record<string, never>): React.JSX.Element {
               </div>
             </div>
             <div style={S.field}>
-              <label style={S.label}>Password (optional, min 8 chars)</label>
+              <label style={S.label}>{t.password}</label>
               <input
                 type="password"
                 value={password}
-                placeholder="Leave empty for no password"
+                placeholder={t.passwordPlaceholder}
                 onChange={(e) => setPassword(inputValue(e))}
                 style={S.input}
               />
             </div>
             <div style={S.field}>
-              <label style={S.label}>DSH secret (auto-inject auth cookies)</label>
+              <label style={S.label}>{t.dshSecret}</label>
               <input
                 type="password"
                 value={dshSecret}
-                placeholder="Base64url DSH browser-session secret"
+                placeholder={t.dshSecretPlaceholder}
                 onChange={(e) => setDshSecret(inputValue(e))}
                 style={S.input}
               />
@@ -426,7 +543,7 @@ export function BridgeCard(_props: Record<string, never>): React.JSX.Element {
         <div style={S.section}>
           <div style={S.sectionHeader}>
             <div style={{ ...S.sectionIcon, background: C.warnSoft, color: C.warn }}>🔒</div>
-            <span style={S.sectionTitle}>TLS</span>
+            <span style={S.sectionTitle}>{t.tls}</span>
           </div>
           <div style={S.sectionBody}>
             <label style={S.checkbox}>
@@ -436,22 +553,22 @@ export function BridgeCard(_props: Record<string, never>): React.JSX.Element {
                 onChange={(e) => setTlsEnabled(checkedValue(e))}
                 style={S.checkboxInput}
               />
-              Enable self-signed TLS
+              {t.enableTls}
             </label>
             {tlsEnabled && (
               <>
                 <div style={S.field}>
-                  <label style={S.label}>SAN hosts (comma-separated)</label>
+                  <label style={S.label}>{t.sanHosts}</label>
                   <input
                     type="text"
                     value={tlsHosts}
-                    placeholder="dsh.example.com, 192.168.1.100"
+                    placeholder={t.sanHostsPlaceholder}
                     onChange={(e) => setTlsHosts(inputValue(e))}
                     style={S.input}
                   />
                 </div>
                 <div style={S.field}>
-                  <label style={S.label}>Cert validity (days)</label>
+                  <label style={S.label}>{t.certValidity}</label>
                   <input
                     type="number"
                     value={tlsDays}
@@ -470,15 +587,15 @@ export function BridgeCard(_props: Record<string, never>): React.JSX.Element {
         <div style={S.section}>
           <div style={S.sectionHeader}>
             <div style={{ ...S.sectionIcon, background: C.successSoft, color: C.success }}>📡</div>
-            <span style={S.sectionTitle}>LAN</span>
+            <span style={S.sectionTitle}>{t.lan}</span>
           </div>
           <div style={S.sectionBody}>
             <div style={S.field}>
-              <label style={S.label}>LAN CIDRs (comma-separated)</label>
+              <label style={S.label}>{t.lanCidrs}</label>
               <input
                 type="text"
                 value={lanCidrs}
-                placeholder="192.168.0.0/16, 10.0.0.0/8"
+                placeholder={t.lanCidrsPlaceholder}
                 onChange={(e) => setLanCidrs(inputValue(e))}
                 style={S.input}
               />
@@ -490,7 +607,7 @@ export function BridgeCard(_props: Record<string, never>): React.JSX.Element {
                 onChange={(e) => setLanPasswordless(checkedValue(e))}
                 style={S.checkboxInput}
               />
-              LAN passwordless (skip login for LAN / loopback)
+              {t.lanPasswordless}
             </label>
           </div>
         </div>
@@ -499,15 +616,15 @@ export function BridgeCard(_props: Record<string, never>): React.JSX.Element {
         <div style={S.section}>
           <div style={S.sectionHeader}>
             <div style={{ ...S.sectionIcon, background: C.dangerSoft, color: C.danger }}>⚡</div>
-            <span style={S.sectionTitle}>WebSocket</span>
+            <span style={S.sectionTitle}>{t.websocket}</span>
           </div>
           <div style={S.sectionBody}>
             <div style={S.field}>
-              <label style={S.label}>WS path whitelist (comma-separated; empty = allow all)</label>
+              <label style={S.label}>{t.wsPaths}</label>
               <input
                 type="text"
                 value={wsPaths}
-                placeholder="/api/remote.mux"
+                placeholder={t.wsPathsPlaceholder}
                 onChange={(e) => setWsPaths(inputValue(e))}
                 style={S.input}
               />
@@ -529,7 +646,7 @@ export function BridgeCard(_props: Record<string, never>): React.JSX.Element {
             opacity: busy ? 0.7 : 1,
           }}
         >
-          {enabled ? '✓ Enabled' : 'Enable'}
+          {enabled ? t.enabled : t.enable}
         </button>
         <button
           onClick={handleDisable}
@@ -542,7 +659,7 @@ export function BridgeCard(_props: Record<string, never>): React.JSX.Element {
             opacity: busy || !enabled ? 0.5 : 1,
           }}
         >
-          Disable
+          {t.disable}
         </button>
         <button
           onClick={handleSave}
@@ -557,7 +674,7 @@ export function BridgeCard(_props: Record<string, never>): React.JSX.Element {
             marginLeft: 'auto',
           }}
         >
-          {busy ? 'Saving…' : 'Save Config'}
+          {busy ? t.saving : t.saveConfig}
         </button>
       </div>
 
@@ -566,8 +683,8 @@ export function BridgeCard(_props: Record<string, never>): React.JSX.Element {
         <div
           style={{
             ...S.status,
-            color: status.startsWith('Error') ? C.danger : C.success,
-            background: status.startsWith('Error') ? C.dangerSoft : C.successSoft,
+            color: status.startsWith(t.error) ? C.danger : C.success,
+            background: status.startsWith(t.error) ? C.dangerSoft : C.successSoft,
           }}
         >
           {status}

@@ -1,0 +1,18 @@
+{
+  "collection": "ms_workspace_c52ddf65",
+  "failed_files": [],
+  "indexed_chunks": 6,
+  "indexed_files": 2,
+  "last_completed_at": "2026-11-09T03:36:24.457394Z",
+  "last_started_at": "2026-11-09T03:36:13.417531Z",
+  "last_success_at": "2026-11-09T03:36:24.457394Z",
+  "milvus_uri": "~/.memsearch/milvus.db",
+  "operation": "index",
+  "paths": [
+    "/workspace/dsh-proxy-bridge/.memsearch/memory"
+  ],
+  "schema_version": 1,
+  "status": "ok",
+  "total_files": 2,
+  "updated_at": "2026-11-09T03:36:24.457394Z"
+}
