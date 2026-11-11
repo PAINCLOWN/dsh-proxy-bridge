@@ -13,7 +13,9 @@
     "sourceMap": true,
     "outDir": "lib",
     "jsx": "react-jsx",
-    "types": ["node"]
+    "types": ["node"],
+    "allowImportingTsExtensions": true,
+    "noEmit": true
   },
   "include": ["src/**/*.ts", "src/**/*.tsx"],
   "exclude": ["node_modules", "lib"]

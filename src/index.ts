@@ -25,8 +25,11 @@
 
 import type { Context } from '@deepseek-ai/cordis'
 import z from '@deepseek-ai/schemastery'
-import SettingsService from '@deepseek-ai/dsh-settings'
+// Side-effect import: loads the dsh-settings module augmentation that adds
+// `settings` (SettingsForms) to the cordis Context type.
+import '@deepseek-ai/dsh-settings'
 import { defineTool } from '@deepseek-ai/dsh-tools'
+import { Remote, TypertRemoteService } from '@deepseek-ai/dsh-typert-protocol'
 import type {} from '@deepseek-ai/cordis-plugin-loader'
 import {
   BridgeConfig,
@@ -38,6 +41,7 @@ import {
   MIN_PASSWORD_LENGTH,
   SETTINGS_NAMESPACE,
   type BridgeConfigValue,
+  type BridgeConfigView,
 } from './config-fields.ts'
 import { ProxyBridge, type ProxyConfig } from './proxy.ts'
 import {
@@ -118,9 +122,10 @@ export function createController(ctx: Context, initialConfig?: Partial<BridgeCon
   // Read persisted config from settings if available (overrides the YAML
   // config, so runtime changes via the proxy_bridge tool stick across restarts).
   try {
-    const settings = ctx.services.get(SettingsService) as SettingsService | undefined
+    const settings = ctx.settings
     if (settings) {
-      const stored = settings.get(SETTINGS_NAMESPACE) as Partial<BridgeConfigValue> | undefined
+      const descriptor = settings.describe().find((d) => d.ns === SETTINGS_NAMESPACE)
+      const stored = descriptor?.value as Partial<BridgeConfigValue> | undefined
       if (stored) {
         config = { ...config, ...stored }
       }
@@ -170,7 +175,7 @@ export function createController(ctx: Context, initialConfig?: Partial<BridgeCon
       lanCidrs: config.lanCidrs,
       lanPasswordless: config.lanPasswordless,
       wsPaths: config.wsPaths,
-      pathRewrites: config.pathRewrites,
+      pathRewrites: config.pathRewrites.map((pair) => [pair[0] ?? '', pair[1] ?? ''] as [string, string]),
       log: (level, message) => ctx.logger[level === 'error' ? 'error' : level === 'warn' ? 'warn' : 'info'](`[proxy-bridge] ${message}`),
       state,
       onStateChange: (newState: BridgeState) => {
@@ -212,8 +217,7 @@ export function createController(ctx: Context, initialConfig?: Partial<BridgeCon
 
     // Persist to settings.
     try {
-      const settings = ctx.services.get(SettingsService) as SettingsService | undefined
-      settings?.set(SETTINGS_NAMESPACE, config)
+      await ctx.settings.update(SETTINGS_NAMESPACE, config)
     } catch {
       // Best effort.
     }
@@ -250,11 +254,93 @@ export function createController(ctx: Context, initialConfig?: Partial<BridgeCon
 }
 
 /**
+ * Host service backing the generated `ctx.remote.bridge` namespace. The web
+ * configuration card (src/client) reads and writes the bridge through this
+ * service over the Typert WebSocket RPC — there is no raw HTTP endpoint.
+ *
+ * The constructor self-registers with the Typert Gateway (inherited from
+ * `TypertRemoteService`), so instantiating it in the plugin body is enough
+ * for the client to reach `ctx.remote.bridge.*`.
+ */
+export class BridgeRemoteService extends TypertRemoteService {
+  private readonly controller: BridgeController
+
+  constructor(ctx: Context, controller: BridgeController) {
+    super(ctx, 'bridgeController', { namespace: 'bridge' })
+    this.controller = controller
+  }
+
+  /** Current bridge status (running state, ports, protocol, auth mode). */
+  @Remote
+  status(): { running: boolean; port: number; dshPort: number; hasPassword: boolean; tls: boolean } {
+    return this.controller.status()
+  }
+
+  /** Redacted config view for the configuration card form. */
+  @Remote
+  getConfig(): BridgeConfigView {
+    const c = this.controller.config
+    return {
+      enabled: c.enabled,
+      port: c.port,
+      dshPort: c.dshPort,
+      hasPassword: c.password.length > 0,
+      cookieName: c.cookieName,
+      cookieMaxAgeDays: c.cookieMaxAgeDays,
+      hasDshSecret: c.dshSecret.length > 0,
+      secureCookies: c.secureCookies,
+      tlsEnabled: c.tlsEnabled,
+      tlsDays: c.tlsDays,
+      tlsHosts: c.tlsHosts,
+      lanCidrs: c.lanCidrs,
+      lanPasswordless: c.lanPasswordless,
+      wsPaths: c.wsPaths,
+      pathRewrites: c.pathRewrites.map((pair) => [pair[0] ?? '', pair[1] ?? ''] as [string, string]),
+    }
+  }
+
+  /**
+   * Apply a partial config update and persist it. `password` / `dshSecret`
+   * are only written when a non-undefined value is supplied (empty string
+   * clears). Returns the fresh status after the update.
+   */
+  @Remote
+  async updateConfig(partial: Partial<BridgeConfigValue>): Promise<{ running: boolean; port: number; dshPort: number; hasPassword: boolean; tls: boolean }> {
+    await this.controller.updateConfig(partial)
+    return this.controller.status()
+  }
+
+  /** Enable the bridge (persist `enabled: true` + start the listener). */
+  @Remote
+  async enable(port?: number, dshPort?: number): Promise<{ running: boolean; port: number; dshPort: number; hasPassword: boolean; tls: boolean }> {
+    const updates: Partial<BridgeConfigValue> = { enabled: true }
+    if (port !== undefined) updates.port = port
+    if (dshPort !== undefined) updates.dshPort = dshPort
+    await this.controller.updateConfig(updates)
+    await this.controller.start()
+    return this.controller.status()
+  }
+
+  /** Disable the bridge (persist `enabled: false` + stop the listener). */
+  @Remote
+  async disable(): Promise<{ running: boolean; port: number; dshPort: number; hasPassword: boolean; tls: boolean }> {
+    await this.controller.updateConfig({ enabled: false })
+    await this.controller.stop()
+    return this.controller.status()
+  }
+}
+
+/**
  * The DSH plugin entry point. Registers the proxy bridge tool and manages
  * the listener lifecycle.
  */
 export default function proxyBridgePlugin(ctx: Context, config?: Partial<BridgeConfigValue>): void {
   const controller = createController(ctx, config)
+
+  // Register the host service the web configuration card calls over the Typert
+  // WebSocket RPC (ctx.remote.bridge.*). The constructor self-registers with
+  // the Typert Gateway, so instantiating it here is all that's needed.
+  new BridgeRemoteService(ctx, controller)
 
   // cordis reads `inject` off the plugin function/object itself (plugin.inject),
   // not off a module-level named export, so the dependency on `tools` must be

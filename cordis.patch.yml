@@ -1,9 +1,8 @@
 # Bundle patch for @painclown/dsh-proxy-bridge.
-# Registers the plugin in the DSH bundle.
-# Note: client module removed — DSH web client uses window.__ModuleLoader__.load()
-# format, not standard ESM. Config card can be added later with proper format.
+# Registers the Host plugin (proxy_bridge tool + BridgeRemoteService) in the
+# DSH bundle. The Client configuration card ships as the ./client export and
+# is loaded by the web client via window.__ModuleLoader__.load().
 - insert:
     - id: dsh-proxy-bridge
       name: '@painclown/dsh-proxy-bridge'
-      entry: .
-      enabled: true
+      config: {}

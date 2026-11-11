@@ -5,7 +5,7 @@
  * @module @painclown/dsh-proxy-bridge/client/bridge-card
  */
 
-import { useState, useCallback, useEffect } from 'react'
+import { useState, useCallback, useEffect, useRef } from 'react'
 
 interface BridgeStatus {
   running: boolean
@@ -299,7 +299,17 @@ const S = {
 
 /* ── Component ─────────────────────────────────────────────────────── */
 
-export function BridgeCard(_props: Record<string, never>): React.JSX.Element {
+/** The host service surface the card calls over the Typert WebSocket RPC. */
+interface BridgeRemote {
+  status(): Promise<{ running: boolean; port: number; dshPort: number; hasPassword: boolean; tls: boolean }>
+  getConfig(): Promise<import('../config-fields.ts').BridgeConfigView>
+  updateConfig(partial: Record<string, unknown>): Promise<{ running: boolean; port: number; dshPort: number; hasPassword: boolean; tls: boolean }>
+  enable(port?: number, dshPort?: number): Promise<{ running: boolean; port: number; dshPort: number; hasPassword: boolean; tls: boolean }>
+  disable(): Promise<{ running: boolean; port: number; dshPort: number; hasPassword: boolean; tls: boolean }>
+}
+
+export function BridgeCard(props: { ctx?: { remote?: { bridge?: BridgeRemote } } }): React.JSX.Element {
+  const bridge = props.ctx?.remote?.bridge
   const [lang, setLang] = useState<Lang>(() => {
     try { return (localStorage.getItem('dsh-bridge-lang') as Lang) || 'zh' } catch { return 'zh' }
   })
@@ -325,40 +335,44 @@ export function BridgeCard(_props: Record<string, never>): React.JSX.Element {
     try { localStorage.setItem('dsh-bridge-lang', l) } catch { /* noop */ }
   }, [])
 
-  // Poll bridge status every 5 s.
+  // Poll bridge status + config every 5 s via the host service (Typert RPC).
+  // The first successful poll also populates the form fields; later polls
+  // only refresh the status badge so the user's in-progress edits are kept.
+  const loadedRef = useRef(false)
   useEffect(() => {
-    const timer = setInterval(async () => {
+    if (!bridge) return
+    let cancelled = false
+    const poll = async () => {
       try {
-        const res = await fetch('/proxy-bridge/config', {
-          method: 'POST',
-          headers: { 'content-type': 'application/json' },
-          body: JSON.stringify({ command: 'status' }),
-        })
-        const data = await res.json() as { ok: boolean; message: string }
-        if (data.ok) {
-          setBridgeStatus({
-            running: data.message.includes('running'),
-            port: 3083,
-            dshPort: 3080,
-            hasPassword: data.message.includes('password'),
-            tls: data.message.includes('https'),
-          })
+        const [st, cfg] = await Promise.all([bridge.status(), bridge.getConfig()])
+        if (cancelled) return
+        setBridgeStatus(st)
+        if (!loadedRef.current) {
+          loadedRef.current = true
+          setEnabled(cfg.enabled)
+          setPort(cfg.port)
+          setDshPort(cfg.dshPort)
+          setTlsEnabled(cfg.tlsEnabled)
+          setTlsDays(cfg.tlsDays)
+          setTlsHosts(cfg.tlsHosts.join(', '))
+          setLanCidrs(cfg.lanCidrs.join(', '))
+          setLanPasswordless(cfg.lanPasswordless)
+          setWsPaths(cfg.wsPaths.join(', '))
+          // password / dshSecret are redacted on the host — leave the input
+          // fields as the user typed them (empty until they type a value).
         }
       } catch { /* bridge not reachable */ }
-    }, 5000)
-    return () => clearInterval(timer)
-  }, [])
+    }
+    void poll()
+    const timer = setInterval(() => void poll(), 5000)
+    return () => { cancelled = true; clearInterval(timer) }
+  }, [bridge])
 
-  const callBridge = useCallback(async (command: string, extra?: Record<string, unknown>) => {
+  const runBridge = useCallback(async (fn: () => Promise<unknown>) => {
     setBusy(true)
     try {
-      const res = await fetch('/proxy-bridge/config', {
-        method: 'POST',
-        headers: { 'content-type': 'application/json' },
-        body: JSON.stringify({ command, ...extra }),
-      })
-      const data = await res.json() as { ok: boolean; message: string }
-      setStatus(data.message ?? (data.ok ? t.ok : t.failed))
+      await fn()
+      setStatus(t.ok)
     } catch (err) {
       setStatus(`${t.error}: ${String(err)}`)
     } finally {
@@ -368,13 +382,13 @@ export function BridgeCard(_props: Record<string, never>): React.JSX.Element {
 
   const handleEnable = useCallback(() => {
     setEnabled(true)
-    void callBridge('enable', { port, dshPort })
-  }, [callBridge, port, dshPort])
+    void runBridge(() => bridge?.enable(port, dshPort) ?? Promise.resolve())
+  }, [runBridge, bridge, port, dshPort])
 
   const handleDisable = useCallback(() => {
     setEnabled(false)
-    void callBridge('disable')
-  }, [callBridge])
+    void runBridge(() => bridge?.disable() ?? Promise.resolve())
+  }, [runBridge, bridge])
 
   const handleSave = useCallback(() => {
     const updates: Record<string, unknown> = { port, dshPort }
@@ -386,8 +400,8 @@ export function BridgeCard(_props: Record<string, never>): React.JSX.Element {
     if (lanCidrs) updates.lanCidrs = lanCidrs.split(',').map((s) => s.trim()).filter(Boolean)
     updates.lanPasswordless = lanPasswordless
     updates.wsPaths = wsPaths.split(',').map((s) => s.trim()).filter(Boolean)
-    void callBridge('config', updates)
-  }, [callBridge, port, dshPort, password, dshSecret, tlsEnabled, tlsHosts, tlsDays, lanCidrs, lanPasswordless, wsPaths])
+    void runBridge(() => bridge?.updateConfig(updates) ?? Promise.resolve())
+  }, [runBridge, bridge, port, dshPort, password, dshSecret, tlsEnabled, tlsHosts, tlsDays, lanCidrs, lanPasswordless, wsPaths])
 
   /* ── Status badge ────────────────────────────────────────────── */
 

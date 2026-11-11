@@ -12,12 +12,16 @@
       "default": "./lib/index.mjs"
     },
     "./client": "./lib/client.js",
+    "./locale/*.json": "./locale/*.json",
+    "./icon": "./icon.svg",
     "./cordis.patch.yml": "./cordis.patch.yml",
     "./package.json": "./package.json"
   },
   "files": [
     "lib",
     "src",
+    "locale/*.json",
+    "icon.svg",
     "cordis.patch.yml"
   ],
   "scripts": {
@@ -32,6 +36,7 @@
     },
     "client": {
       "platform": "web",
+      "immediately": true,
       "inject": [
         "@deepseek-ai/dsh-client-ui-settings-plugins"
       ]

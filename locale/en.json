@@ -1,0 +1,6 @@
+{
+  "meta": {
+    "title": "DSH proxy bridge",
+    "description": "Reverse-proxy bridge that forwards the DSH web GUI through a TLS-terminating proxy (nginx), fixing the WebSocket Origin/Host mismatch that breaks connections through nginx → gateway → DSH chains."
+  }
+}

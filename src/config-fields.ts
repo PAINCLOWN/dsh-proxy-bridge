@@ -71,7 +71,7 @@ export const BridgeConfig = z.object({
   pathRewrites: z.array(z.tuple([z.string(), z.string()])).default([['/sidebar/api/', '/api/']]),
 })
 
-export type BridgeConfigValue = z.infer<typeof BridgeConfig>
+export type BridgeConfigValue = Schemastery.TypeT<typeof BridgeConfig>
 
 /** Keys that are always present in the config. */
 export const CONFIG_FIELD_KEYS = [
@@ -107,3 +107,28 @@ export const OPTIONAL_CONFIG_KEYS = [
   'wsPaths',
   'pathRewrites',
 ] as const
+
+/**
+ * Redacted view of the bridge config exposed to the web client. Secrets
+ * (password, dshSecret) are never sent in cleartext — only a `has*` flag —
+ * so the configuration card can show "set / empty" without leaking them.
+ * Lives here (not in index.ts) so the client bundle can import it without
+ * pulling in host-only code (http/net/crypto).
+ */
+export interface BridgeConfigView {
+  enabled: boolean
+  port: number
+  dshPort: number
+  hasPassword: boolean
+  cookieName: string
+  cookieMaxAgeDays: number
+  hasDshSecret: boolean
+  secureCookies: boolean
+  tlsEnabled: boolean
+  tlsDays: number
+  tlsHosts: string[]
+  lanCidrs: string[]
+  lanPasswordless: boolean
+  wsPaths: string[]
+  pathRewrites: [string, string][]
+}
