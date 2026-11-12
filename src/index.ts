@@ -29,7 +29,7 @@ import z from '@deepseek-ai/schemastery'
 // `settings` (SettingsForms) to the cordis Context type.
 import '@deepseek-ai/dsh-settings'
 import { defineTool } from '@deepseek-ai/dsh-tools'
-import { Remote, TypertRemoteService } from '@deepseek-ai/dsh-typert-protocol'
+import { Remote, TypertRemoteService, type DshRemoteMethodContext } from '@deepseek-ai/dsh-typert-protocol'
 import type {} from '@deepseek-ai/cordis-plugin-loader'
 import {
   BridgeConfig,
@@ -271,13 +271,11 @@ export class BridgeRemoteService extends TypertRemoteService {
   }
 
   /** Current bridge status (running state, ports, protocol, auth mode). */
-  @Remote
   status(): { running: boolean; port: number; dshPort: number; hasPassword: boolean; tls: boolean } {
     return this.controller.status()
   }
 
   /** Redacted config view for the configuration card form. */
-  @Remote
   getConfig(): BridgeConfigView {
     const c = this.controller.config
     return {
@@ -304,14 +302,12 @@ export class BridgeRemoteService extends TypertRemoteService {
    * are only written when a non-undefined value is supplied (empty string
    * clears). Returns the fresh status after the update.
    */
-  @Remote
   async updateConfig(partial: Partial<BridgeConfigValue>): Promise<{ running: boolean; port: number; dshPort: number; hasPassword: boolean; tls: boolean }> {
     await this.controller.updateConfig(partial)
     return this.controller.status()
   }
 
   /** Enable the bridge (persist `enabled: true` + start the listener). */
-  @Remote
   async enable(port?: number, dshPort?: number): Promise<{ running: boolean; port: number; dshPort: number; hasPassword: boolean; tls: boolean }> {
     const updates: Partial<BridgeConfigValue> = { enabled: true }
     if (port !== undefined) updates.port = port
@@ -322,13 +318,49 @@ export class BridgeRemoteService extends TypertRemoteService {
   }
 
   /** Disable the bridge (persist `enabled: false` + stop the listener). */
-  @Remote
   async disable(): Promise<{ running: boolean; port: number; dshPort: number; hasPassword: boolean; tls: boolean }> {
     await this.controller.updateConfig({ enabled: false })
     await this.controller.stop()
     return this.controller.status()
   }
 }
+
+/**
+ * Apply the `Remote` marker to a public instance method WITHOUT decorator
+ * syntax. tsdown/rolldown does not transform standard TC39 decorators, and
+ * Node cannot parse a raw `@Remote` token, so we replicate what the DSH
+ * `__esDecorate` transform emits: call `Remote(method, context)` with a
+ * hand-built context, then run the registered initializers with `this` bound
+ * to a dummy instance (so `Object.getPrototypeOf(this)` is the class
+ * prototype, where `mark()` records the Remote descriptor the Typert Gateway
+ * reads).
+ */
+function applyRemoteMarker(ctor: { prototype: object }, methodName: string): void {
+  const initializers: Array<() => void> = []
+  const context: DshRemoteMethodContext = {
+    kind: 'method',
+    name: methodName,
+    static: false,
+    private: false,
+    access: {
+      has: (obj: object) => methodName in obj,
+      get: (obj: object) => (obj as Record<string, unknown>)[methodName],
+    },
+    addInitializer: (fn) => {
+      if (typeof fn === 'function') initializers.push(fn)
+    },
+  }
+  Remote((ctor.prototype as Record<string, unknown>)[methodName], context)
+  const dummy = Object.create(ctor.prototype)
+  for (const init of initializers) init.call(dummy)
+}
+
+// Mark the Remote methods (equivalent to the `@Remote` decorators).
+applyRemoteMarker(BridgeRemoteService, 'status')
+applyRemoteMarker(BridgeRemoteService, 'getConfig')
+applyRemoteMarker(BridgeRemoteService, 'updateConfig')
+applyRemoteMarker(BridgeRemoteService, 'enable')
+applyRemoteMarker(BridgeRemoteService, 'disable')
 
 /**
  * The DSH plugin entry point. Registers the proxy bridge tool and manages
