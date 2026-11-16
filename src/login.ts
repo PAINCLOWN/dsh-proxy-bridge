@@ -242,7 +242,7 @@ input[type="password"]:focus {
 <div class="card">
   <div class="brand">
     <div class="brand-icon">
-      <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M12 22s8-4 8-10V5l-8-3-8 3v7c0 6 8 10 8 10z"/></svg>
+      <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 64 64" fill="none" stroke="currentColor" stroke-width="4" stroke-linecap="round" stroke-linejoin="round"><path d="M32 10 L51 21 L51 43 L32 54 L13 43 L13 21 Z"/><path d="M32 22 L22 40 M32 22 L42 40 M22 40 L42 40"/><circle cx="32" cy="22" r="4" fill="currentColor" stroke="none"/><circle cx="22" cy="40" r="4" fill="currentColor" stroke="none"/><circle cx="42" cy="40" r="4" fill="currentColor" stroke="none"/></svg>
     </div>
     <div>
       <h1>DSH Bridge <span class="version-badge">v2.0</span></h1>
