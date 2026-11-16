@@ -41,29 +41,63 @@ DSH Web GUI 的 WebSocket 连接在通过 `nginx → 网关 → DSH` 链路时�
 
 ## 安装
 
-```bash
-# 通过 DSH 插件命令安装
-dsh plugin --profile web add @painclown/dsh-proxy-bridge
+> 本包暂未发布到 npm，请从 GitHub 安装。
 
-# 或手动安装
-cd ~/.dsh/profiles/web
-npm install @painclown/dsh-proxy-bridge
+### 方式一：DSH 插件命令（推荐）
+
+```bash
+# 安装到 web profile（运行 Web GUI 的 profile）
+dsh plugin --profile web add github:PAINCLOWN/dsh-proxy-bridge
+
+# 以后更新到最新版本
+dsh plugin --profile web update @painclown/dsh-proxy-bridge
 ```
+
+安装后重启 DSH（或重新加载 profile）即可生效。
+
+### 方式二：手动安装（开发/自定义部署）
+
+```bash
+# 1. 克隆仓库到持久目录
+git clone https://github.com/PAINCLOWN/dsh-proxy-bridge.git ~/dsh-proxy-bridge
+cd ~/dsh-proxy-bridge
+
+# 2. 安装依赖并构建
+pnpm install
+pnpm build
+
+# 3. 链接到目标 profile 的 node_modules
+ln -sfn ~/dsh-proxy-bridge ~/.dsh/profiles/web/node_modules/@painclown/dsh-proxy-bridge
+```
+
+> 链接方式便于本地修改后直接生效（改完 `pnpm build` 即可，无需重装）。
+
+### 卸载
+
+```bash
+dsh plugin --profile web remove @painclown/dsh-proxy-bridge
+```
+
+### 验证安装
+
+在 DSH 会话中调用 `proxy_bridge status` 工具，看到 `Bridge running on 0.0.0.0:3083 → 127.0.0.1:3080` 即安装成功。
 
 ## 快速开始
 
-```bash
-# 1. 启用桥（默认 3083 → 3080）
-proxy_bridge enable
+`proxy_bridge` 是 DSH 工具（不是 shell 命令），在 DSH 会话中由 agent 调用，或在 GUI 中通过工具面板触发：
 
-# 2. 设置密码（至少 8 位）
-proxy_bridge config password=<your-password>
+```
+1. 启用桥（默认 3083 → 3080）
+   proxy_bridge enable
 
-# 3. 配置 DSH Secret（从 ~/.dsh/.credentials.yaml 读取）
-proxy_bridge config dshSecret=<your-dsh-secret>
+2. 设置密码（至少 8 位）
+   proxy_bridge config password=<your-password>
 
-# 4. 检查状态
-proxy_bridge status
+3. 配置 DSH Secret（从 ~/.dsh/.credentials.yaml 读取）
+   proxy_bridge config dshSecret=<your-dsh-secret>
+
+4. 检查状态
+   proxy_bridge status
 ```
 
 ## 命令参考
@@ -175,13 +209,17 @@ server {
 ## 开发
 
 ```bash
-# 构建
-npx tsdown
+# 构建（host + client + wrap）
+pnpm build
 
-# 部署到 DSH profile
-rm -rf ~/.dsh/profiles/web/node_modules/@painclown/dsh-proxy-bridge/lib/
-cp -r lib/ ~/.dsh/profiles/web/node_modules/@painclown/dsh-proxy-bridge/lib/
+# 类型检查
+pnpm typecheck
+
+# 测试
+pnpm test
 ```
+
+如果 profile 里的插件是指向本仓库的符号链接（见"手动安装"），构建后直接生效，无需额外部署步骤。
 
 ### 源码结构
 

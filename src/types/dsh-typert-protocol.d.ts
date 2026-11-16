@@ -31,19 +31,35 @@ declare module '@deepseek-ai/dsh-typert-protocol' {
     )
   }
 
-  type RemoteMethodDecorator = <This extends object, Args extends unknown[], Result>(
-    method: (this: This, ...args: Args) => Result,
-    context: ClassMethodDecoratorContext<This, (this: This, ...args: Args) => Result>,
-  ) => void
+  /**
+   * The method-decorator context shape the DSH `__esDecorate` transform
+   * supplies. Note it uses `name` (not the standard `key`) — the real
+   * `Remote` implementation reads `context.name`.
+   */
+  export interface DshRemoteMethodContext {
+    readonly kind: 'method'
+    readonly name: string
+    readonly static: boolean
+    readonly private: boolean
+    readonly access: {
+      has(object: object): boolean
+      get(object: object): unknown
+      set?(object: object, value: unknown): void
+    }
+    addInitializer(initializer: () => void): void
+  }
 
   /**
    * Marks a method as remotely callable. Used as a direct decorator
-   * (`@Remote`) — the form the DSH host controllers use.
+   * (`@Remote`) — the form the DSH host controllers use. The plugin applies
+   * it manually (no decorator syntax) via the (method, context) call.
    */
-  export function Remote<This extends object, Args extends unknown[], Result>(
-    method: (this: This, ...args: Args) => Result,
-    context: ClassMethodDecoratorContext<This, (this: This, ...args: Args) => Result>,
+  export function Remote(
+    method: unknown,
+    context: DshRemoteMethodContext,
   ): void
   /** Factory form: `@Remote("name")` / `@Remote({ ... })`. */
-  export function Remote(name: string): RemoteMethodDecorator
+  export function Remote(
+    name: string,
+  ): (method: unknown, context: DshRemoteMethodContext) => void
 }
